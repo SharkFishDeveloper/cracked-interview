@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow ,ipcMain} from "electron";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -28,3 +28,8 @@ function createWindow() {
 }
 
 app.whenReady().then(createWindow);
+
+ipcMain.on("resize-window", (e, { width, height }) => {
+  const win = BrowserWindow.getFocusedWindow();
+  if (win) win.setSize(width, height);
+});

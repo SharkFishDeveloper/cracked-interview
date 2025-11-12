@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 
+
 const WS_URL = "ws://localhost:8080/ui";
 
 export default function App() {
@@ -92,6 +93,42 @@ export default function App() {
   const statusColor = connected ? "#4ade80" : "#ef4444";
   const audioColor = isReceivingAudio ? "#4ade80" : "#9ca3af";
 
+  // ---- Resizing logic ----
+  const resizingRef = useRef(false);
+  const startPos = useRef({ x: 0, y: 0 });
+  const startSize = useRef({ width: 0, height: 0 });
+
+  const handleMouseDown = (e) => {
+    e.preventDefault();
+    resizingRef.current = true;
+    startPos.current = { x: e.clientX, y: e.clientY };
+
+    // Get current window size
+    const { innerWidth, innerHeight } = window;
+    startSize.current = { width: innerWidth, height: innerHeight };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  };
+
+  const handleMouseMove = (e) => {
+    if (!resizingRef.current) return;
+    const dx = e.clientX - startPos.current.x;
+    const dy = e.clientY - startPos.current.y;
+
+    const newWidth = Math.max(300, startSize.current.width + dx);
+    const newHeight = Math.max(200, startSize.current.height + dy);
+
+    // Use Electron remote API to resize the window dynamically
+    window.resizeTo(newWidth, newHeight);
+  };
+
+  const handleMouseUp = () => {
+    resizingRef.current = false;
+    document.removeEventListener("mousemove", handleMouseMove);
+    document.removeEventListener("mouseup", handleMouseUp);
+  };
+
   return (
     <div
       style={{
@@ -108,12 +145,13 @@ export default function App() {
         alignItems: "center",
         justifyContent: "center",
         userSelect: "none",
+        position: "relative",
       }}
     >
       {/* === Drag Pill === */}
       <div
         style={{
-          WebkitAppRegion: "drag", // ✅ makes it draggable in Electron
+          WebkitAppRegion: "drag",
           width: "120px",
           height: "20px",
           background: "rgba(255,255,255,0.2)",
@@ -132,7 +170,7 @@ export default function App() {
           borderRadius: 10,
           padding: "1rem",
           background: "transparent",
-          WebkitAppRegion: "no-drag", // ✅ makes buttons & content clickable
+          WebkitAppRegion: "no-drag",
         }}
       >
         <h3 style={{ marginBottom: 6, textAlign: "center", fontSize: "1rem" }}>
@@ -223,7 +261,9 @@ export default function App() {
         <div style={{ display: "flex", gap: 12 }}>
           {/* Left: Transcript */}
           <div style={{ flex: "0 0 30%" }}>
-            <h4 style={{ marginBottom: 6, fontSize: "0.9rem" }}>User Transcript</h4>
+            <h4 style={{ marginBottom: 6, fontSize: "0.9rem" }}>
+              User Transcript
+            </h4>
             <div
               ref={scrollRef}
               style={{
@@ -267,6 +307,22 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {/* === Bottom-right resize handle === */}
+      <div
+        onMouseDown={handleMouseDown}
+        style={{
+          position: "absolute",
+          bottom: "6px",
+          right: "6px",
+          width: "16px",
+          height: "16px",
+          borderRadius: "50%",
+          background: "white",
+          cursor: "nwse-resize",
+          WebkitAppRegion: "no-drag",
+        }}
+      ></div>
     </div>
   );
 }
