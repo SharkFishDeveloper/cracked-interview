@@ -5,34 +5,32 @@ const WS_URL = "ws://localhost:8080/ui";
 export default function App() {
   const [connected, setConnected] = useState(false);
   const [isReceivingAudio, setIsReceivingAudio] = useState(false);
-  const [transcripts, setTranscripts] = useState([]);
-  const scrollRef = useRef(null);
-  const audioTimer = useRef(null);
-  const wsRef = useRef(null);
+  const [finalTranscript, setFinalTranscript] = useState("");
+  const [partialTranscript, setPartialTranscript] = useState("");
+  const [aiResponse, setAiResponse] = useState("");
 
-  // ---- Function to connect ----
+  const scrollRef = useRef(null);
+  const wsRef = useRef(null);
+  const audioTimer = useRef(null);
+
   const connectWebSocket = () => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
-
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log("✅ Connected to WebSocket");
       setConnected(true);
-      setTranscripts([]); // clear previous logs
+      setFinalTranscript("");
+      setPartialTranscript("");
+      setAiResponse("");
     };
 
     ws.onclose = () => {
-      console.log("🔌 WebSocket closed");
       setConnected(false);
       setIsReceivingAudio(false);
     };
 
-    ws.onerror = (err) => {
-      console.error("❌ WebSocket error:", err);
-      setConnected(false);
-    };
+    ws.onerror = () => setConnected(false);
 
     ws.onmessage = (event) => {
       let msg;
@@ -42,45 +40,32 @@ export default function App() {
         return;
       }
 
-      // --- Transcript handling ---
       if (msg.type === "transcript") {
-        setTranscripts((prev) => {
-          const updated = [...prev];
-
-          // Update last entry
-          if (msg.isPartial) {
-            if (updated.length > 0 && updated[updated.length - 1].startsWith("🗣️"))
-              updated[updated.length - 1] = "🗣️ " + msg.transcript;
-            else updated.push("🗣️ " + msg.transcript);
-          } else {
-            if (updated.length > 0 && updated[updated.length - 1].startsWith("🗣️"))
-              updated[updated.length - 1] = "✅ " + msg.transcript;
-            else updated.push("✅ " + msg.transcript);
-          }
-
-          // ---- ⏬ Limit to last 100 words ----
-          const allWords = updated.join(" ").split(/\s+/);
-          const last100Words = allWords.slice(-100).join(" ");
-
-          // Rebuild transcript array (split lines back for display)
-          return last100Words.split(/(?<=✅|🗣️)/).map((s) => s.trim()).filter(Boolean);
-        });
+        const text = msg.transcript.trim();
+        if (msg.isPartial) {
+          setPartialTranscript(text);
+        } else {
+          setFinalTranscript((prev) => {
+            const newText = (prev + " " + text).trim();
+            const words = newText.split(/\s+/);
+            return words.slice(-150).join(" ");
+          });
+          setPartialTranscript("");
+        }
       }
 
-      // --- Audio activity ---
       if (msg.type === "audio_status") {
         setIsReceivingAudio(true);
         clearTimeout(audioTimer.current);
         audioTimer.current = setTimeout(() => setIsReceivingAudio(false), 2000);
       }
 
-      if (msg.type === "status" || msg.type === "info") {
-        console.log("ℹ️", msg.message);
+      if (msg.type === "ai_answer") {
+        setAiResponse(msg.text || "⚠️ No AI response received.");
       }
     };
   };
 
-  // ---- Disconnect ----
   const disconnectWebSocket = () => {
     if (wsRef.current) {
       wsRef.current.close();
@@ -88,14 +73,21 @@ export default function App() {
     }
     setConnected(false);
     setIsReceivingAudio(false);
-    setTranscripts([]);
-    console.log("🛑 Disconnected manually");
   };
 
-  // ---- Auto-scroll transcript ----
+  const askAI = () => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      alert("WebSocket not connected yet!");
+      return;
+    }
+    const fullText = (finalTranscript + " " + partialTranscript).trim();
+    wsRef.current.send(JSON.stringify({ type: "ask_ai", text: fullText }));
+    setAiResponse("🤔 Thinking...");
+  };
+
   useEffect(() => {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
-  }, [transcripts]);
+  }, [finalTranscript, partialTranscript]);
 
   const statusColor = connected ? "#4ade80" : "#ef4444";
   const audioColor = isReceivingAudio ? "#4ade80" : "#9ca3af";
@@ -104,34 +96,56 @@ export default function App() {
     <div
       style={{
         fontFamily: "Inter, sans-serif",
-        background: "#0b0f17",
+        background: "transparent",
         color: "white",
-        minHeight: "100vh",
-        padding: "2rem",
+        height: "100%",
+        width: "100%",
+        margin: 0,
+        padding: 0,
+        overflow: "hidden",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
+        justifyContent: "center",
+        userSelect: "none",
       }}
     >
+      {/* === Drag Pill === */}
       <div
         style={{
-          width: "100%",
-          maxWidth: 700,
-          background: "#111827",
-          borderRadius: 12,
-          padding: 24,
-          boxShadow: "0 0 20px rgba(0,0,0,0.3)",
+          WebkitAppRegion: "drag", // ✅ makes it draggable in Electron
+          width: "120px",
+          height: "20px",
+          background: "rgba(255,255,255,0.2)",
+          border: "2px solid white",
+          borderRadius: "20px",
+          marginBottom: "10px",
+          cursor: "move",
+        }}
+      ></div>
+
+      <div
+        style={{
+          width: "90%",
+          maxWidth: 900,
+          border: "1.5px solid white",
+          borderRadius: 10,
+          padding: "1rem",
+          background: "transparent",
+          WebkitAppRegion: "no-drag", // ✅ makes buttons & content clickable
         }}
       >
-        <h2 style={{ marginBottom: 10 }}>🎧 Live Transcriber Dashboard</h2>
+        <h3 style={{ marginBottom: 6, textAlign: "center", fontSize: "1rem" }}>
+          Live Transcriber + AI Dashboard
+        </h3>
 
         {/* Status bar */}
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
-            fontSize: 14,
-            marginBottom: 16,
+            fontSize: 12,
+            marginBottom: 10,
           }}
         >
           <span>
@@ -143,65 +157,114 @@ export default function App() {
           <span>
             Audio:{" "}
             <strong style={{ color: audioColor }}>
-              {isReceivingAudio ? "Receiving 🎙️" : "Idle ⏸️"}
+              {isReceivingAudio ? "Receiving 🎙️" : "Idle"}
             </strong>
           </span>
         </div>
 
         {/* Buttons */}
-        <div style={{ marginBottom: 20, display: "flex", gap: 10 }}>
+        <div style={{ marginBottom: 12, display: "flex", gap: 6 }}>
           <button
             onClick={connectWebSocket}
             disabled={connected}
             style={{
               flex: 1,
-              padding: "10px 0",
-              background: connected ? "#374151" : "#10b981",
+              padding: "6px 0",
+              background: "transparent",
               color: "white",
-              border: "none",
-              borderRadius: 8,
+              border: "1.5px solid white",
+              borderRadius: 6,
               cursor: connected ? "not-allowed" : "pointer",
+              fontSize: "0.85rem",
               fontWeight: 600,
             }}
           >
-            ▶️ Start
+            Start
           </button>
+
           <button
             onClick={disconnectWebSocket}
             disabled={!connected}
             style={{
               flex: 1,
-              padding: "10px 0",
-              background: !connected ? "#374151" : "#ef4444",
+              padding: "6px 0",
+              background: "transparent",
               color: "white",
-              border: "none",
-              borderRadius: 8,
+              border: "1.5px solid white",
+              borderRadius: 6,
               cursor: !connected ? "not-allowed" : "pointer",
+              fontSize: "0.85rem",
               fontWeight: 600,
             }}
           >
-            ⏹ Stop
+            Stop
+          </button>
+
+          <button
+            onClick={askAI}
+            disabled={!connected}
+            style={{
+              flex: 1,
+              padding: "6px 0",
+              background: "transparent",
+              color: "white",
+              border: "1.5px solid white",
+              borderRadius: 6,
+              cursor: !connected ? "not-allowed" : "pointer",
+              fontSize: "0.85rem",
+              fontWeight: 600,
+            }}
+          >
+            Ask AI
           </button>
         </div>
 
-        {/* Transcripts */}
-        <h3 style={{ marginBottom: 8 }}>🗒️ Live Transcription</h3>
-        <div
-          ref={scrollRef}
-          style={{
-            background: "#000",
-            color: "#0f0",
-            padding: 16,
-            borderRadius: 8,
-            height: 350,
-            overflowY: "auto",
-            fontFamily: "monospace",
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          {transcripts.length === 0
-            ? "Waiting for audio..."
-            : transcripts.join("\n")}
+        {/* Split layout */}
+        <div style={{ display: "flex", gap: 12 }}>
+          {/* Left: Transcript */}
+          <div style={{ flex: "0 0 30%" }}>
+            <h4 style={{ marginBottom: 6, fontSize: "0.9rem" }}>User Transcript</h4>
+            <div
+              ref={scrollRef}
+              style={{
+                background: "transparent",
+                color: "white",
+                border: "1.5px solid white",
+                borderRadius: 6,
+                height: 250,
+                overflowY: "auto",
+                fontFamily: "monospace",
+                whiteSpace: "pre-wrap",
+                fontSize: 12,
+                padding: 10,
+              }}
+            >
+              {finalTranscript || partialTranscript
+                ? `${finalTranscript} ${partialTranscript}`
+                : "Waiting for audio..."}
+            </div>
+          </div>
+
+          {/* Right: AI Response */}
+          <div style={{ flex: "0 0 70%" }}>
+            <h4 style={{ marginBottom: 6, fontSize: "0.9rem" }}>AI Response</h4>
+            <div
+              style={{
+                background: "transparent",
+                color: "white",
+                border: "1.5px solid white",
+                borderRadius: 6,
+                height: 250,
+                overflowY: "auto",
+                fontFamily: "Inter, sans-serif",
+                whiteSpace: "pre-wrap",
+                fontSize: 13,
+                padding: 10,
+              }}
+            >
+              {aiResponse || "No AI answer yet."}
+            </div>
+          </div>
         </div>
       </div>
     </div>
