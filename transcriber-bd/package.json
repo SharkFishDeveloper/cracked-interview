@@ -1,0 +1,20 @@
+{
+  "name": "transcriber-bd",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "description": "",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.929.0",
+    "@aws-sdk/client-textract": "^3.929.0",
+    "@aws-sdk/client-transcribe-streaming": "^3.929.0",
+    "dotenv": "^17.2.3",
+    "ws": "^8.18.3"
+  }
+}
