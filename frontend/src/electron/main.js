@@ -1,13 +1,17 @@
-import { app, BrowserWindow, ipcMain, desktopCapturer, screen } from "electron";
+import { app, BrowserWindow, ipcMain, desktopCapturer, screen, globalShortcut } from "electron";
 import path from "path";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ⚠️ 1. Declare mainWindow globally or outside of createWindow
+let mainWindow;
+let isHiddenState = false;  
 function createWindow() {
 
-  const mainWindow = new BrowserWindow({
+  // ⚠️ 2. Assign the created window to the outside variable
+  mainWindow = new BrowserWindow({
     width: 400,
     height: 300,
     frame: false,
@@ -18,7 +22,7 @@ function createWindow() {
 
     // IMPORTANT TO HIDE FROM ALT+TAB
     show: false,
-    focusable: true,  
+    focusable: true, // You might want to try setting this to false to prevent taking focus 
 
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -42,7 +46,27 @@ function createWindow() {
 
   mainWindow.loadURL("http://localhost:5173");
 
+  // ---------------- HANDLE CTRL + SPACE ----------------
+  globalShortcut.register("CommandOrControl+Space", () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+
+    isHiddenState = !isHiddenState;
+
+    if (isHiddenState) {
+      // HIDE MODE
+      mainWindow.setIgnoreMouseEvents(true, { forward: false });
+      mainWindow.setOpacity(0.01);   // almost invisible
+      mainWindow.webContents.send("toggle-visibility", true);
+    } else {
+      // SHOW MODE
+      mainWindow.setIgnoreMouseEvents(false);
+      mainWindow.setOpacity(1);      // fully visible
+      mainWindow.webContents.send("toggle-visibility", false);
+    }
+  });
+
   // ---------------------------------------- RESIZE
+  // ... (Your resize handler is correct)
   ipcMain.handle("resize-window", (_evt, { width, height }) => {
     if (!mainWindow) return;
 
@@ -60,6 +84,7 @@ function createWindow() {
   });
 
   // ---------------------------------------- CAPTURE UNDERLAY
+  // ... (Your capture handler is correct)
   ipcMain.handle("capture-underlay", async () => {
     if (!mainWindow) return null;
 
@@ -102,4 +127,10 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+});
+
+app.on('will-quit', () => {
+    globalShortcut.unregisterAll();
+});

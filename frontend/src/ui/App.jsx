@@ -10,7 +10,7 @@ const btn = {
   color: "white",
   border: "1px solid rgba(255,255,255,0.3)",
   cursor: "pointer",
-  whiteSpace: "nowrap",    // prevents breaking words
+  whiteSpace: "nowrap", // prevents breaking words
 };
 
 export default function App() {
@@ -21,6 +21,9 @@ export default function App() {
   const [aiResponse, setAiResponse] = useState("");
   const [shots, setShots] = useState([]);
 
+  // Buttons
+  const [isHidden, setIsHidden] = useState(false); // Used for visibility toggle
+
   const [ocrLoading, setOcrLoading] = useState(false);
   const ocrAbortRef = useRef(null);
 
@@ -28,6 +31,16 @@ export default function App() {
   const scrollRef = useRef(null);
   const wsRef = useRef(null);
   const audioTimer = useRef(null);
+
+  // ------------------- KEYBOARD TOGGLE LOGIC (NEW) -------------------
+  useEffect(() => {
+    if (window.electronAPI?.onToggleVisibility) {
+      // The callback receives the event and any arguments (which we ignore here)
+      window.electronAPI.onToggleVisibility(() => {
+        setIsHidden(prev => !prev);
+      });
+    }
+  }, []); // Empty dependency array means this runs once on mount
 
   // ------------------- WebSocket -------------------
   const connectWebSocket = () => {
@@ -120,15 +133,15 @@ export default function App() {
   };
 
   const handleStartPause = () => {
-  if (!connected) connectWebSocket();
-  else disconnectWebSocket();
-};
+    if (!connected) connectWebSocket();
+    else disconnectWebSocket();
+  };
 
-const handleOCRToggle = () => {
-  if (!shots[0]) return;
-  if (!ocrLoading) runOCR();
-  else cancelOCR();
-};
+  const handleOCRToggle = () => {
+    if (!shots[0]) return;
+    if (!ocrLoading) runOCR();
+    else cancelOCR();
+  };
 
   // ------------------- Remove Screenshot -------------------
   const removeScreenshot = () => {
@@ -218,7 +231,7 @@ const handleOCRToggle = () => {
         inset: 0,
         background: "transparent",
         color: "white",
-        display: "flex",
+        display: isHidden ? 'none' : 'flex', // Apply visibility here
         flexDirection: "column",
         alignItems: "center",
         overflow: "hidden",
@@ -267,88 +280,88 @@ const handleOCRToggle = () => {
         }}
       >
 
-        
- {/* Top Buttons */}
-<div
-  style={{
-    display: "flex",
-    alignItems: "center",
-    marginBottom: 4,
-    gap: 0, // No space between dots and buttons
-  }}
->
-  {/* Status Dots */}
-  <div
-    style={{
-      display: "flex",
-      alignItems: "center",
-      gap: 4,       // Spacing only between the dots
-      marginRight: 4, // VERY tiny space so dots do not visually merge with the button
-    }}
-  >
-    <div
-      style={{
-        width: 8,
-        height: 8,
-        borderRadius: "50%",
-        background: connected ? "#4ade80" : "#ef4444",
-      }}
-    />
-    <div
-      style={{
-        width: 8,
-        height: 8,
-        borderRadius: "50%",
-        background: isReceivingAudio ? "#4ade80" : "#ef4444",
-      }}
-    />
-  </div>
 
-  {/* Buttons — Touching dots, compact, responsive */}
-  <div
-    style={{
-      display: "flex",
-      flexWrap: "wrap",
-      gap: 4,
-      maxWidth: "100%",
-      justifyContent: "flex-start",
-    }}
-  >
-    {/* Start / Pause Toggle */}
-    <button style={btn} onClick={handleStartPause}>
-      {connected ? "Pause" : "Start"}
-    </button>
+        {/* Top Buttons */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            marginBottom: 4,
+            gap: 0, // No space between dots and buttons
+          }}
+        >
+          {/* Status Dots */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4, // Spacing only between the dots
+              marginRight: 4, // VERY tiny space so dots do not visually merge with the button
+            }}
+          >
+            <div
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: connected ? "#4ade80" : "#ef4444",
+              }}
+            />
+            <div
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: isReceivingAudio ? "#4ade80" : "#ef4444",
+              }}
+            />
+          </div>
 
-    {/* Capture */}
-    <button style={btn} onClick={captureUnderlay}>
-      Capture
-    </button>
+          {/* Buttons — Touching dots, compact, responsive */}
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 4,
+              maxWidth: "100%",
+              justifyContent: "flex-start",
+            }}
+          >
+            {/* Start / Pause Toggle */}
+            <button style={btn} onClick={handleStartPause}>
+              {connected ? "Pause" : "Start"}
+            </button>
 
-    {/* Remove screenshot */}
-    <button style={btn} onClick={removeScreenshot} disabled={!shots.length}>
-      Remove Img
-    </button>
+            {/* Capture */}
+            <button style={btn} onClick={captureUnderlay}>
+              Capture
+            </button>
 
-    {/* OCR Toggle */}
-    <button
-      style={btn}
-      onClick={handleOCRToggle}
-      disabled={!shots[0]}
-    >
-      {ocrLoading ? "Stop OCR" : "OCR"}
-    </button>
+            {/* Remove screenshot */}
+            <button style={btn} onClick={removeScreenshot} disabled={!shots.length}>
+              Remove Img
+            </button>
 
-    {/* Clear all transcripts */}
-    <button style={btn} onClick={clearHistory}>
-      Clear
-    </button>
+            {/* OCR Toggle */}
+            <button
+              style={btn}
+              onClick={handleOCRToggle}
+              disabled={!shots[0]}
+            >
+              {ocrLoading ? "Stop OCR" : "OCR"}
+            </button>
 
-    {/* Ask AI */}
-    <button style={btn} onClick={askAI} disabled={!connected}>
-      Ask
-    </button>
-  </div>
-</div>
+            {/* Clear all transcripts */}
+            <button style={btn} onClick={clearHistory}>
+              Clear
+            </button>
+
+            {/* Ask AI */}
+            <button style={btn} onClick={askAI} disabled={!connected}>
+              Ask
+            </button>
+          </div>
+        </div>
 
 
         {/* Two Panels */}
