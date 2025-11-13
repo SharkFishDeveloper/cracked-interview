@@ -145,33 +145,38 @@ const screenStreamRef = useRef(null);
 
 
   // ------------------- Resize Logic -------------------
+ // ------------------- Resize Logic -------------------
   const resizing = useRef(false);
   const startPos = useRef({ x: 0, y: 0 });
   const startSize = useRef({ w: 0, h: 0 });
 
-  const onResizeStart = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    resizing.current = true;
+const onResizeStart = async (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  resizing.current = true;
 
-    startPos.current = { x: e.clientX, y: e.clientY };
-    startSize.current = {
-      w: window.innerWidth,
-      h: window.innerHeight,
-    };
+  const size = await window.electronAPI.getWindowSize();
 
-    window.addEventListener("mousemove", onResizeMove);
-    window.addEventListener("mouseup", onResizeEnd);
+  startPos.current = { x: e.clientX, y: e.clientY };
+  startSize.current = {
+    w: size.width,
+    h: size.height,
   };
 
+  window.addEventListener("mousemove", onResizeMove);
+  window.addEventListener("mouseup", onResizeEnd);
+};
   const onResizeMove = (e) => {
     if (!resizing.current) return;
 
     const dx = e.clientX - startPos.current.x;
     const dy = e.clientY - startPos.current.y;
 
-    const w = Math.max(360, startSize.current.w + dx);
-    const h = Math.max(220, startSize.current.h + dy);
+    const MIN_W = 200;
+    const MIN_H = 150;
+
+    const w = Math.max(MIN_W, startSize.current.w + dx);
+    const h = Math.max(MIN_H, startSize.current.h + dy);
 
     if (window.electronAPI?.resizeWindow) {
       window.electronAPI.resizeWindow(w, h);
@@ -185,6 +190,7 @@ const screenStreamRef = useRef(null);
     window.removeEventListener("mousemove", onResizeMove);
     window.removeEventListener("mouseup", onResizeEnd);
   };
+
 
   // ------------------- UI -------------------
   return (
@@ -343,20 +349,21 @@ const screenStreamRef = useRef(null);
 
         {/* Resize pill */}
         <div
-          onMouseDown={onResizeStart}
-          style={{
-            position: "absolute",
-            bottom: 8,
-            right: 14,
-            width: 24,
-            height: 24,
-            borderRadius: "50%",
-            background: "white",
-            cursor: "nwse-resize",
-            boxShadow: "0 0 8px rgba(255,255,255,0.9)",
-            WebkitAppRegion: "no-drag",
-          }}
-        />
+            onMouseDown={onResizeStart}
+            style={{
+              position: "absolute",
+              bottom: 10,
+              right: 18,
+              width: 26,
+              height: 26,
+              borderRadius: "50%",
+              background: "white",
+              boxShadow: "0 0 10px rgba(255,255,255,0.9)",
+              cursor: "nwse-resize",
+              WebkitAppRegion: "no-drag",
+              pointerEvents: "auto",    // pill stays clickable
+            }}
+          />
       </div>
     </div>
   );

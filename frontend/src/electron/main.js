@@ -28,13 +28,25 @@ mainWindow.setContentProtection(false);
 mainWindow.setIgnoreMouseEvents(false, { forward: true });
   mainWindow.loadURL("http://localhost:5173");
 
-  // FIXED: correct argument names
   ipcMain.handle("resize-window", (_evt, { width, height }) => {
     if (!mainWindow) return;
-    const W = Math.max(100, Number(width) || 300);
-    const H = Math.max(100, Number(height) || 200);
-    mainWindow.setSize(W, H, true);
-  });
+
+    const W = Math.max(200, Number(width));
+    const H = Math.max(150, Number(height));
+
+    const currentBounds = mainWindow.getBounds();
+
+    // Use setBounds to change size while keeping the top-left corner (x, y) fixed.
+    mainWindow.setBounds({
+        x: currentBounds.x, // Keep X position the same
+        y: currentBounds.y, // Keep Y position the same
+        width: W,           // New Width
+        height: H           // New Height
+    }, true); // The 'true' is for animation, which is usually unnecessary here
+
+    console.log("Resize to:", W, H);
+    // mainWindow.setSize(W, H, true); // <-- REMOVE THIS LINE
+});
 
   // FIXED: correct crop information (logical → physical pixels)
  ipcMain.handle("capture-underlay", async () => {
@@ -77,7 +89,9 @@ mainWindow.setIgnoreMouseEvents(false, { forward: true });
   mainWindow.show();
   return cropped.toDataURL();
 });
-
+ipcMain.handle("get-window-size", () => {
+  return mainWindow.getBounds();
+});
 }
 
 app.whenReady().then(createWindow);
