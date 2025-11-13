@@ -10,7 +10,7 @@ const btn = {
   color: "white",
   border: "1px solid rgba(255,255,255,0.3)",
   cursor: "pointer",
-  whiteSpace: "nowrap", // prevents breaking words
+  whiteSpace: "nowrap",
 };
 
 export default function App() {
@@ -21,74 +21,98 @@ export default function App() {
   const [aiResponse, setAiResponse] = useState("");
   const [shots, setShots] = useState([]);
 
-  // Buttons
-  const [isHidden, setIsHidden] = useState(false); // Used for visibility toggle
+  const [isHidden, setIsHidden] = useState(false);
 
   const [ocrLoading, setOcrLoading] = useState(false);
-  const ocrAbortRef = useRef(null);
+  const [aiLoading, setAiLoading] = useState(false); // NEW (Ask ↔ Cancel)
+  const [hideTranscript, setHideTranscript] = useState(false); // NEW (Hide Left Panel)
 
+  const ocrAbortRef = useRef(null);
   const overlayRef = useRef(null);
   const scrollRef = useRef(null);
   const wsRef = useRef(null);
   const audioTimer = useRef(null);
 
-  // ------------------- KEYBOARD TOGGLE LOGIC (NEW) -------------------
+  // ------------------- TOGGLE VISIBILITY -------------------
   useEffect(() => {
     if (window.electronAPI?.onToggleVisibility) {
-      // The callback receives the event and any arguments (which we ignore here)
       window.electronAPI.onToggleVisibility(() => {
-        setIsHidden(prev => !prev);
+        setIsHidden((prev) => !prev);
       });
     }
-  }, []); // Empty dependency array means this runs once on mount
+  }, []);
 
-
-  // -----------MOVEMENT--------------
+  // ------------------- MOVEMENT KEYS (unchanged) -------------------
   useEffect(() => {
-  const step = 15;
+    const step = 15;
+    const handler = (e) => {
+      if (!e.ctrlKey || !e.altKey) return;
+      if (e.key === "ArrowUp") window.electronAPI.moveWindow(0, -step);
+      else if (e.key === "ArrowDown") window.electronAPI.moveWindow(0, step);
+      else if (e.key === "ArrowLeft") window.electronAPI.moveWindow(-step, 0);
+      else if (e.key === "ArrowRight") window.electronAPI.moveWindow(step, 0);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
-  const handler = (e) => {
-    if (!e.ctrlKey || !e.altKey) return;
-
-    if (e.key === "ArrowUp") {
-      window.electronAPI.moveWindow(0, -step);
-    } else if (e.key === "ArrowDown") {
-      window.electronAPI.moveWindow(0, step);
-    } else if (e.key === "ArrowLeft") {
-      window.electronAPI.moveWindow(-step, 0);
-    } else if (e.key === "ArrowRight") {
-      window.electronAPI.moveWindow(step, 0);
-    }
-  };
-
-  window.addEventListener("keydown", handler);
-  return () => window.removeEventListener("keydown", handler);
-}, []);
-
+  // ------------------- RESIZE KEYS (unchanged) -------------------
   useEffect(() => {
-  const step = 20;
+    const step = 20;
+    const handler = async (e) => {
+      if (!e.ctrlKey || !e.shiftKey) return;
+      const size = await window.electronAPI.getWindowSize();
+      let { width, height } = size;
 
-  const handler = async (e) => {
-    if (!e.ctrlKey || !e.shiftKey) return; // resize combo
+      if (e.key === "ArrowRight") width += step;
+      else if (e.key === "ArrowLeft") width -= step;
+      else if (e.key === "ArrowDown") height += step;
+      else if (e.key === "ArrowUp") height -= step;
+      else return;
 
-    const size = await window.electronAPI.getWindowSize();
-    let { width, height } = size;
+      window.electronAPI.resizeWindow(width, height);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
-    if (e.key === "ArrowRight") width += step;
-    else if (e.key === "ArrowLeft") width -= step;
-    else if (e.key === "ArrowDown") height += step;
-    else if (e.key === "ArrowUp") height -= step;
-    else return;
+  // ------------------- BUTTON HOTKEYS (simple keys) -------------------
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.ctrlKey && !e.altKey && !e.shiftKey && e.key === "ArrowLeft") {
+        setHideTranscript(p => !p);
+        return;
+      }
+      if (e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return;
+      switch (e.key.toLowerCase()) {
+        case "z":
+          handleStartPause();
+          break;
+        case "x":
+          captureUnderlay();
+          break;
+        case "c":
+          removeScreenshot();
+          break;
+        case "v":
+          handleOCRToggle();
+          break;
+        case "b":
+          clearHistory();
+          break;
+        case "a":
+          askAI(); // auto toggles Ask/Cancel
+          break;
+        default:
+          return;
+      }
+    };
 
-    window.electronAPI.resizeWindow(width, height);
-  };
-
-  window.addEventListener("keydown", handler);
+     window.addEventListener("keydown", handler);
   return () => window.removeEventListener("keydown", handler);
-}, []);
+}, [connected, shots, ocrLoading, finalTranscript, partialTranscript, aiLoading]);
 
-
-  // ------------------- WebSocket -------------------
+  // ------------------- WEBSOCKET -------------------
   const connectWebSocket = () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
@@ -105,6 +129,7 @@ export default function App() {
     ws.onclose = () => {
       setConnected(false);
       setIsReceivingAudio(false);
+      setAiLoading(false);
     };
 
     ws.onerror = () => setConnected(false);
@@ -119,14 +144,12 @@ export default function App() {
 
       if (msg.type === "transcript") {
         const text = msg.transcript.trim();
-
         if (msg.isPartial) {
           setPartialTranscript(text);
         } else {
           setFinalTranscript((p) => {
             const combined = (p + " " + text).trim();
-            const words = combined.split(/\s+/);
-            return words.slice(-150).join(" ");
+            return combined.split(/\s+/).slice(-150).join(" ");
           });
           setPartialTranscript("");
         }
@@ -140,6 +163,7 @@ export default function App() {
 
       if (msg.type === "ai_answer") {
         setAiResponse(msg.text || "No response");
+        setAiLoading(false); // IMPORTANT — stop spinner, toggle Cancel→Ask
       }
     };
   };
@@ -149,28 +173,37 @@ export default function App() {
     wsRef.current = null;
     setConnected(false);
     setIsReceivingAudio(false);
+    setAiLoading(false);
   };
 
+  // ------------------- ASK AI (now toggle Ask ↔ Cancel) -------------------
   const askAI = () => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      // alert("WS not connected");
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+    // Cancel AI if already asking
+    if (aiLoading) {
+      setAiLoading(false);
+      setAiResponse("Cancelled.");
       return;
     }
+
+    // Send AI request
     const full = `${finalTranscript} ${partialTranscript}`.trim();
     wsRef.current.send(JSON.stringify({ type: "ask_ai", text: full }));
+
+    setAiLoading(true);
     setAiResponse("Thinking...");
   };
 
-  // Scroll transcript as text grows
+  // ------------------- SCROLL -------------------
   useEffect(() => {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
   }, [finalTranscript, partialTranscript, shots, ocrLoading]);
 
-  // ------------------- Screen Capture -------------------
+  // ------------------- SCREEN CAPTURE -------------------
   const captureUnderlay = async () => {
     try {
       if (!window.electronAPI?.captureUnderlay) return;
-
       const dataUrl = await window.electronAPI.captureUnderlay();
       setShots((prev) => [dataUrl, ...prev]);
     } catch (err) {
@@ -189,18 +222,16 @@ export default function App() {
     else cancelOCR();
   };
 
-  // ------------------- Remove Screenshot -------------------
   const removeScreenshot = () => {
-    setShots([]); // removes all screenshots
+    setShots([]);
   };
 
-  // ------------------- Clear Transcript History -------------------
   const clearHistory = () => {
     setFinalTranscript("");
     setPartialTranscript("");
   };
 
-  // ------------------- OCR Logic -------------------
+  // ------------------- OCR LOGIC -------------------
   const runOCR = async () => {
     if (!shots[0]) return alert("Capture first!");
 
@@ -212,12 +243,11 @@ export default function App() {
 
     try {
       const text = await runOCRRequest(shots[0], controller.signal);
-
       if (text) {
         setFinalTranscript((p) => (p + "\n" + text).trim());
       }
     } catch (err) {
-      if (err.name !== "AbortError") console.error("OCR error:", err);
+      if (err.name !== "AbortError") console.error(err);
     }
 
     ocrAbortRef.current = null;
@@ -232,7 +262,7 @@ export default function App() {
     }
   };
 
-  // ------------------- Resize Logic -------------------
+  // ------------------- RESIZE DRAG LOGIC (unchanged) -------------------
   const resizing = useRef(false);
   const startPos = useRef({ x: 0, y: 0 });
   const startSize = useRef({ w: 0, h: 0 });
@@ -259,8 +289,7 @@ export default function App() {
     const w = Math.max(200, startSize.current.w + dx);
     const h = Math.max(150, startSize.current.h + dy);
 
-    if (window.electronAPI?.resizeWindow) window.electronAPI.resizeWindow(w, h);
-    else window.resizeTo(w, h);
+    window.electronAPI.resizeWindow(w, h);
   };
 
   const onResizeEnd = () => {
@@ -277,7 +306,7 @@ export default function App() {
         inset: 0,
         background: "transparent",
         color: "white",
-        display: isHidden ? 'none' : 'flex', // Apply visibility here
+        display: isHidden ? "none" : "flex",
         flexDirection: "column",
         alignItems: "center",
         overflow: "hidden",
@@ -285,7 +314,7 @@ export default function App() {
         userSelect: "none",
       }}
     >
-      {/* Drag bar */}
+      {/* Drag Bar */}
       <div
         style={{
           WebkitAppRegion: "drag",
@@ -325,26 +354,17 @@ export default function App() {
           WebkitAppRegion: "no-drag",
         }}
       >
-
-
-        {/* Top Buttons */}
+        {/* Buttons */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
             marginBottom: 4,
-            gap: 0, // No space between dots and buttons
+            gap: 4,
           }}
         >
-          {/* Status Dots */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 4, // Spacing only between the dots
-              marginRight: 4, // VERY tiny space so dots do not visually merge with the button
-            }}
-          >
+          {/* Status Lights */}
+          <div style={{ display: "flex", alignItems: "center", gap: 4, marginRight: 4 }}>
             <div
               style={{
                 width: 8,
@@ -363,93 +383,77 @@ export default function App() {
             />
           </div>
 
-          {/* Buttons — Touching dots, compact, responsive */}
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 4,
-              maxWidth: "100%",
-              justifyContent: "flex-start",
-            }}
-          >
-            {/* Start / Pause Toggle */}
+          {/* Buttons */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
             <button style={btn} onClick={handleStartPause}>
               {connected ? "Pause" : "Start"}
             </button>
 
-            {/* Capture */}
-            <button style={btn} onClick={captureUnderlay}>
-              Capture
-            </button>
+            <button style={btn} onClick={captureUnderlay}>Capture</button>
 
-            {/* Remove screenshot */}
             <button style={btn} onClick={removeScreenshot} disabled={!shots.length}>
               Remove Img
             </button>
 
-            {/* OCR Toggle */}
-            <button
-              style={btn}
-              onClick={handleOCRToggle}
-              disabled={!shots[0]}
-            >
+            <button style={btn} onClick={handleOCRToggle} disabled={!shots[0]}>
               {ocrLoading ? "Stop OCR" : "OCR"}
             </button>
 
-            {/* Clear all transcripts */}
-            <button style={btn} onClick={clearHistory}>
-              Clear
+            <button style={btn} onClick={clearHistory}>Clear</button>
+
+            <button style={btn} onClick={askAI} disabled={!connected}>
+              {aiLoading ? "Cancel" : "Ask"}
             </button>
 
-            {/* Ask AI */}
-            <button style={btn} onClick={askAI} disabled={!connected}>
-              Ask
+            <button style={btn} onClick={() => setHideTranscript(p => !p)}>
+              {hideTranscript ? "User" : "Show"}
             </button>
           </div>
         </div>
 
-
-        {/* Two Panels */}
+        {/* Panels */}
         <div style={{ flex: 1, display: "flex", gap: 8, overflow: "hidden" }}>
-          {/* LEFT PANEL */}
-          <div style={{ flexBasis: "35%" }}>
-            <div
-              ref={scrollRef}
-              style={{
-                height: "100%",
-                overflowY: "auto",
-                border: "1.5px solid white",
-                borderRadius: 8,
-                padding: 6,
-                fontFamily: "monospace",
-                fontSize: 12,
-                background: "rgba(255,255,255,0.08)",
-              }}
-            >
-              {shots[0] && (
-                <img
-                  src={shots[0]}
-                  style={{
-                    width: "100%",
-                    borderRadius: 6,
-                    marginBottom: 8,
-                    pointerEvents: "none",
-                  }}
-                />
-              )}
+          
+          {/* LEFT PANEL (User transcript + screenshot) */}
+          {!hideTranscript && (
+            <div style={{ flexBasis: "30%" }}>
+              <div
+                ref={scrollRef}
+                style={{
+                  height: "100%",
+                  overflowY: "auto",
+                  border: "1.5px solid white",
+                  borderRadius: 8,
+                  padding: 6,
+                  fontFamily: "monospace",
+                  fontSize: 12,
+                  background: "rgba(255,255,255,0.08)",
+                }}
+              >
+                {shots[0] && (
+                  <img
+                    src={shots[0]}
+                    style={{
+                      width: "100%",
+                      borderRadius: 6,
+                      marginBottom: 8,
+                      pointerEvents: "none",
+                    }}
+                  />
+                )}
 
-              {(finalTranscript || partialTranscript) && (
-                <div style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>
-                  {finalTranscript}
-                  {partialTranscript && " " + partialTranscript}
-                </div>
-              )}
+                {(finalTranscript || partialTranscript) && (
+                  <div style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>
+                    {finalTranscript}
+                    {partialTranscript && " " + partialTranscript}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* RIGHT PANEL */}
-          <div style={{ flex: 1 }}>
+          {/* RIGHT PANEL (AI response) */}
+          <div style={{ flex: hideTranscript ? 1 : "70%" }}>
             <div
               style={{
                 height: "100%",
@@ -467,7 +471,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Resize handle */}
+        {/* Resize Handle */}
         <div
           onMouseDown={onResizeStart}
           style={{
