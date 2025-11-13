@@ -2,6 +2,10 @@ import { useState, useEffect, useRef } from "react";
 
 const WS_URL = "ws://localhost:8080/ui";
 
+
+console.log("---- Overlay Debug ----");
+console.log("window.electronAPI =", window.electronAPI);
+console.log("typeof window.electronAPI =", typeof window.electronAPI);
 export default function App() {
   const [connected, setConnected] = useState(false);
   const [isReceivingAudio, setIsReceivingAudio] = useState(false);
@@ -115,43 +119,27 @@ const screenStreamRef = useRef(null);
   };
 
   const captureUnderlay = async () => {
-    try {
-      const { crop } = await window.electronAPI.getUnderlayCropInfo();
-      const stream = await getStream();
+  try {
+    console.log("➡️ Calling captureUnderlay");
 
-      const video = document.createElement("video");
-      video.srcObject = stream;
-      await video.play();
-
-      await new Promise((resolve) =>
-        video.readyState >= 2 ? resolve() : (video.onloadeddata = resolve)
-      );
-
-      const canvas = document.createElement("canvas");
-      canvas.width = crop.width;
-      canvas.height = crop.height;
-      const ctx = canvas.getContext("2d");
-
-      ctx.drawImage(
-        video,
-        crop.x,
-        crop.y,
-        crop.width,
-        crop.height,
-        0,
-        0,
-        crop.width,
-        crop.height
-      );
-
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
-      setShots((prev) => [dataUrl, ...prev]);
-
-      await window.electronAPI.saveShot(dataUrl);
-    } catch (err) {
-      console.error("Screen capture failed:", err);
+    if (!window.electronAPI) {
+      console.error("❌ electronAPI missing");
+      return;
     }
-  };
+
+    if (!window.electronAPI.captureUnderlay) {
+      console.error("❌ captureUnderlay not available");
+      return;
+    }
+
+    const dataUrl = await window.electronAPI.captureUnderlay();
+    console.log("Got screenshot:", dataUrl.substring(0, 80));
+
+    setShots(prev => [dataUrl, ...prev]);
+  } catch (err) {
+    console.error("Screen capture failed:", err);
+  }
+};
 
 
 

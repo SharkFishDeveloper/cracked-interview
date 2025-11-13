@@ -6,27 +6,26 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 function createWindow() {
-  const mainWindow = new BrowserWindow({
-    height: 300,
-    width: 400,
-    minHeight: 200,
-    minWidth: 300,
-    transparent: true,
-    useContentSize: true,
-    frame: false,
-    resizable: true,
-    titleBarStyle: "hidden",
-    thickFrame: true,
-    backgroundColor: "#00000000",
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    focusable: true,
-    show: true,
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-    },
-  });
+const mainWindow = new BrowserWindow({
+  width: 400,
+  height: 300,
+  frame: false,
+  transparent: true,
+  backgroundColor: "#00000001",   // <-- IMPORTANT
+  alwaysOnTop: true,
+  skipTaskbar: true,
 
+  webPreferences: {
+    preload: path.join(__dirname, "preload.js"),
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: false
+  }
+});
+
+// Prevent window from being captured
+mainWindow.setContentProtection(false);
+mainWindow.setIgnoreMouseEvents(false, { forward: true });
   mainWindow.loadURL("http://localhost:5173");
 
   // FIXED: correct argument names
@@ -38,29 +37,46 @@ function createWindow() {
   });
 
   // FIXED: correct crop information (logical → physical pixels)
-  ipcMain.handle("get-underlay-crop-info", async () => {
-    if (!mainWindow) throw new Error("No window");
-    const overlayBounds = mainWindow.getBounds();
-    const display = screen.getDisplayMatching(overlayBounds);
-    const scale = display.scaleFactor || 1;
+ ipcMain.handle("capture-underlay", async () => {
+  if (!mainWindow) return null;
 
-    const sources = await desktopCapturer.getSources({
-      types: ["screen"],
-      thumbnailSize: { width: 1, height: 1 },
-    });
+  mainWindow.hide();
+  await new Promise(r => setTimeout(r, 16));
 
-    const match =
-      sources.find((s) => s.display_id === String(display.id)) || sources[0];
+  const bounds = mainWindow.getBounds();
+  const display = screen.getDisplayMatching(bounds);
+  const scale = display.scaleFactor || 1;
 
-    const crop = {
-      x: Math.round(overlayBounds.x * scale),
-      y: Math.round(overlayBounds.y * scale),
-      width: Math.round(overlayBounds.width * scale),
-      height: Math.round(overlayBounds.height * scale),
-    };
+  // Windows-safe fallback (display.size may be undefined)
+  const { width, height } = display.bounds;
 
-    return { sourceId: match.id, crop };
+  const sources = await desktopCapturer.getSources({
+    types: ["screen"],
+    thumbnailSize: {
+      width: Math.round(width * scale),
+      height: Math.round(height * scale),
+    },
   });
+
+  const screenSource =
+    sources.find(s => s.display_id === String(display.id)) || sources[0];
+
+  const img = screenSource.thumbnail;
+
+  const crop = {
+    x: Math.round(bounds.x * scale),
+    y: Math.round(bounds.y * scale),
+    width: Math.round(bounds.width * scale),
+    height: Math.round(bounds.height * scale),
+  };
+
+  console.log("CROPPING", crop);
+
+  const cropped = img.crop(crop);
+
+  mainWindow.show();
+  return cropped.toDataURL();
+});
 
 }
 

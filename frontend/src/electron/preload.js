@@ -1,7 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
 
+console.log("🔥 PRELOAD EXECUTED");
+
 contextBridge.exposeInMainWorld("electronAPI", {
-  getUnderlayCropInfo: () => ipcRenderer.invoke("get-underlay-crop-info"),
-  saveShot: (dataUrl) => ipcRenderer.invoke("save-shot", dataUrl),
-  resizeWindow: (w, h) => ipcRenderer.invoke("resize-window", { w, h }),
+  captureUnderlay: () => ipcRenderer.invoke("capture-underlay"),
+
+  resizeWindow: (w, h) => ipcRenderer.invoke("resize-window", {
+    width: w, height: h
+  })
 });
