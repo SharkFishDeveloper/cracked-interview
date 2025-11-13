@@ -8,6 +8,8 @@ export default function App() {
   const [finalTranscript, setFinalTranscript] = useState("");
   const [partialTranscript, setPartialTranscript] = useState("");
   const [aiResponse, setAiResponse] = useState("");
+  const [shots, setShots] = useState([]);
+  const overlayRef = useRef(null);
 
   const scrollRef = useRef(null);
   const wsRef = useRef(null);
@@ -15,7 +17,8 @@ export default function App() {
 
   // ------------------- WebSocket -------------------
   const connectWebSocket = () => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
+    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
@@ -30,6 +33,7 @@ export default function App() {
       setConnected(false);
       setIsReceivingAudio(false);
     };
+
     ws.onerror = () => setConnected(false);
 
     ws.onmessage = (ev) => {
@@ -83,9 +87,74 @@ export default function App() {
     setAiResponse("🤔 Thinking...");
   };
 
+  // Scroll the transcript as text grows
   useEffect(() => {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
-  }, [finalTranscript, partialTranscript]);
+  }, [finalTranscript, partialTranscript, shots]);
+
+  // ------------------- Screen Capture -------------------
+const screenStreamRef = useRef(null);
+
+  const getStream = async () => {
+    if (screenStreamRef.current) return screenStreamRef.current;
+
+    const { sourceId } = await window.electronAPI.getUnderlayCropInfo();
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        mandatory: {
+          chromeMediaSource: "desktop",
+          chromeMediaSourceId: sourceId,
+        },
+      },
+    });
+
+    screenStreamRef.current = stream;
+    return stream;
+  };
+
+  const captureUnderlay = async () => {
+    try {
+      const { crop } = await window.electronAPI.getUnderlayCropInfo();
+      const stream = await getStream();
+
+      const video = document.createElement("video");
+      video.srcObject = stream;
+      await video.play();
+
+      await new Promise((resolve) =>
+        video.readyState >= 2 ? resolve() : (video.onloadeddata = resolve)
+      );
+
+      const canvas = document.createElement("canvas");
+      canvas.width = crop.width;
+      canvas.height = crop.height;
+      const ctx = canvas.getContext("2d");
+
+      ctx.drawImage(
+        video,
+        crop.x,
+        crop.y,
+        crop.width,
+        crop.height,
+        0,
+        0,
+        crop.width,
+        crop.height
+      );
+
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+      setShots((prev) => [dataUrl, ...prev]);
+
+      await window.electronAPI.saveShot(dataUrl);
+    } catch (err) {
+      console.error("Screen capture failed:", err);
+    }
+  };
+
+
+
 
   // ------------------- Resize Logic -------------------
   const resizing = useRef(false);
@@ -134,15 +203,14 @@ export default function App() {
     <div
       style={{
         position: "fixed",
-        inset: 0,                     // <-- FULL WINDOW ALWAYS
+        inset: 0,
         background: "transparent",
         color: "white",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         overflow: "hidden",
-        paddingTop: 2,
-        padding:6,
+        padding: 4,
         userSelect: "none",
       }}
     >
@@ -151,11 +219,11 @@ export default function App() {
         style={{
           WebkitAppRegion: "drag",
           width: "50%",
-          height: 26,
-          borderRadius: 14,
+          height: 22,
+          borderRadius: 12,
           border: "2px solid white",
-          background: "rgba(255,255,255,0.12)",
-          marginBottom: 8,
+          background: "rgba(255,255,255,0.1)",
+          marginBottom: 4,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -163,81 +231,78 @@ export default function App() {
       >
         <div
           style={{
-            width: "80%",
-            height: 10,
-            borderRadius: 6,
-            background: "rgba(255,255,255,0.18)",
+            width: "75%",
+            height: 8,
+            borderRadius: 4,
+            background: "rgba(255,255,255,0.2)",
           }}
         />
       </div>
 
-      {/* Main box */}
+      {/* Main Box */}
       <div
+        ref={overlayRef}
         style={{
           width: "95%",
           flex: 1,
           border: "1.5px solid white",
-          borderRadius: 12,
-          padding: 2,
+          borderRadius: 10,
+          padding: 4,
           display: "flex",
           flexDirection: "column",
-          overflowY: "auto",      // ✅ FIX RESPONSIVENESS
-          overflowX: "hidden",
+          overflow: "hidden",
           WebkitAppRegion: "no-drag",
         }}
       >
-        {/* Status + Buttons */}
+        {/* Status Row */}
         <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 4,     // ↓ minimal spacing
-          padding: 0,
-        }}
-      >
-  {/* Ultra-compact status dots */}
-  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-    <div
-      style={{
-        width: 8,
-        height: 8,
-        borderRadius: "50%",
-        background: connected ? "#4ade80" : "#ef4444",
-        boxShadow: connected
-          ? "0 0 4px rgba(74,222,128,0.8)"
-          : "0 0 4px rgba(239,68,68,0.8)",
-      }}
-    />
-    <div
-      style={{
-        width: 8,
-        height: 8,
-        borderRadius: "50%",
-        background: isReceivingAudio ? "#4ade80" : "#ef4444",
-        boxShadow: isReceivingAudio
-          ? "0 0 4px rgba(74,222,128,0.8)"
-          : "0 0 4px rgba(239,68,68,0.8)",
-      }}
-    />
-  </div>
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 4,
+          }}
+        >
+          {/* Status Dots */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: connected ? "#4ade80" : "#ef4444",
+              }}
+            />
+            <div
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: isReceivingAudio ? "#4ade80" : "#ef4444",
+              }}
+            />
+          </div>
 
-  {/* Buttons */}
-  <div style={{ display: "flex", gap: 4 }}>
-    <button onClick={connectWebSocket} disabled={connected} style={{ padding: "2px 6px" }}>
-      Start
-    </button>
-    <button onClick={disconnectWebSocket} disabled={!connected} style={{ padding: "2px 6px" }}>
-      Stop
-    </button>
-    <button onClick={askAI} disabled={!connected} style={{ padding: "2px 6px" }}>
-      Ask
-    </button>
-  </div>
-</div>
+          {/* Buttons */}
+          <div style={{ display: "flex", gap: 4 }}>
+            <button style={{ padding: "2px 6px" }} onClick={captureUnderlay}>
+              Capture sds
+            </button>
+            <button style={{ padding: "2px 6px" }} onClick={connectWebSocket} disabled={connected}>
+              Start
+            </button>
+            <button style={{ padding: "2px 6px" }} onClick={disconnectWebSocket} disabled={!connected}>
+              Stop
+            </button>
+            <button style={{ padding: "2px 6px" }} onClick={askAI} disabled={!connected}>
+              Ask
+            </button>
+          </div>
+        </div>
 
         {/* Panels */}
-        <div style={{ flex: 1, display: "flex", gap: 12, overflow: "hidden" }}>
+        <div style={{ flex: 1, display: "flex", gap: 8, overflow: "hidden" }}>
+          {/* LEFT PANEL - Transcript + Captures */}
           <div style={{ flexBasis: "35%" }}>
             <div
               ref={scrollRef}
@@ -245,26 +310,42 @@ export default function App() {
                 height: "100%",
                 overflowY: "auto",
                 border: "1.5px solid white",
-                borderRadius: 10,
-                padding: 10,
-                background: "rgba(255,255,255,0.06)",
+                borderRadius: 8,
+                padding: 6,
+                fontFamily: "monospace",
+                fontSize: 12,
+                background: "rgba(255,255,255,0.08)",
               }}
             >
-              {finalTranscript || partialTranscript
-                ? `${finalTranscript} ${partialTranscript}`
-                : "Waiting for audio..."}
+              {/* transcript text */}
+              {(finalTranscript || partialTranscript) && (
+                <div style={{ marginBottom: 6 }}>
+                  {finalTranscript} {partialTranscript}
+                </div>
+              )}
+              {shots[0] && (
+                <div style={{ marginTop: 6 }}>
+                  <img
+                    src={shots[0]}
+                    alt="underlay capture"
+                    style={{ width: "100%", borderRadius: 6, display: "block", pointerEvents: "none" }}
+                  />
+                </div>
+              )}
             </div>
           </div>
 
+          {/* RIGHT PANEL - AI Response */}
           <div style={{ flex: 1 }}>
             <div
               style={{
                 height: "100%",
                 overflowY: "auto",
                 border: "1.5px solid white",
-                borderRadius: 10,
-                padding: 10,
-                background: "rgba(255,255,255,0.06)",
+                borderRadius: 8,
+                padding: 6,
+                fontSize: 13,
+                background: "rgba(255,255,255,0.08)",
               }}
             >
               {aiResponse || "No AI answer yet."}
@@ -272,35 +353,22 @@ export default function App() {
           </div>
         </div>
 
+        {/* Resize pill */}
         <div
+          onMouseDown={onResizeStart}
           style={{
             position: "absolute",
-            bottom: 10,
-            right: 10,
-            fontSize: 12,
-            opacity: 0.8,
-            pointerEvents: "none",   // allow underlying drag area to work
+            bottom: 8,
+            right: 14,
+            width: 24,
+            height: 24,
+            borderRadius: "50%",
+            background: "white",
+            cursor: "nwse-resize",
+            boxShadow: "0 0 8px rgba(255,255,255,0.9)",
+            WebkitAppRegion: "no-drag",
           }}
-          >
-        </div>
-
-          <div
-            onMouseDown={onResizeStart}
-            style={{
-              position: "absolute",
-              bottom: 10,
-              right: 18,
-              width: 26,
-              height: 26,
-              borderRadius: "50%",
-              background: "white",
-              boxShadow: "0 0 10px rgba(255,255,255,0.9)",
-              cursor: "nwse-resize",
-              WebkitAppRegion: "no-drag",
-              pointerEvents: "auto",    // pill stays clickable
-            }}
-          />
-
+        />
       </div>
     </div>
   );

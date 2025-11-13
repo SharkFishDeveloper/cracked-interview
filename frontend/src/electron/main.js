@@ -1,4 +1,4 @@
-import { app, BrowserWindow ,ipcMain} from "electron";
+import { app, BrowserWindow, ipcMain, desktopCapturer, screen } from "electron";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -19,7 +19,7 @@ function createWindow() {
     thickFrame: true,
     backgroundColor: "#00000000",
     alwaysOnTop: true,
-    skipTaskbar: true,       // ← never show in taskbar
+    skipTaskbar: true,
     focusable: true,
     show: true,
     webPreferences: {
@@ -28,15 +28,40 @@ function createWindow() {
   });
 
   mainWindow.loadURL("http://localhost:5173");
-  ipcMain.handle("resize-window", (_evt, { w, h }) => {
+
+  // FIXED: correct argument names
+  ipcMain.handle("resize-window", (_evt, { width, height }) => {
     if (!mainWindow) return;
-    const minW = 100;
-    const minH = 100;
-    const W = Math.max(minW, Math.floor(Number(w) || 0));
-    const H = Math.max(minH, Math.floor(Number(h) || 0));
+    const W = Math.max(100, Number(width) || 300);
+    const H = Math.max(100, Number(height) || 200);
     mainWindow.setSize(W, H, true);
   });
+
+  // FIXED: correct crop information (logical → physical pixels)
+  ipcMain.handle("get-underlay-crop-info", async () => {
+    if (!mainWindow) throw new Error("No window");
+    const overlayBounds = mainWindow.getBounds();
+    const display = screen.getDisplayMatching(overlayBounds);
+    const scale = display.scaleFactor || 1;
+
+    const sources = await desktopCapturer.getSources({
+      types: ["screen"],
+      thumbnailSize: { width: 1, height: 1 },
+    });
+
+    const match =
+      sources.find((s) => s.display_id === String(display.id)) || sources[0];
+
+    const crop = {
+      x: Math.round(overlayBounds.x * scale),
+      y: Math.round(overlayBounds.y * scale),
+      width: Math.round(overlayBounds.width * scale),
+      height: Math.round(overlayBounds.height * scale),
+    };
+
+    return { sourceId: match.id, crop };
+  });
+
 }
 
 app.whenReady().then(createWindow);
-
