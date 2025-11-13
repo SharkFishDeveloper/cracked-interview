@@ -23,7 +23,6 @@ const mainWindow = new BrowserWindow({
   }
 });
 
-// Prevent window from being captured
 mainWindow.setContentProtection(false);
 mainWindow.setIgnoreMouseEvents(false, { forward: true });
   mainWindow.loadURL("http://localhost:5173");
@@ -44,22 +43,16 @@ mainWindow.setIgnoreMouseEvents(false, { forward: true });
         height: H           // New Height
     }, true); // The 'true' is for animation, which is usually unnecessary here
 
-    console.log("Resize to:", W, H);
-    // mainWindow.setSize(W, H, true); // <-- REMOVE THIS LINE
 });
 
   // FIXED: correct crop information (logical → physical pixels)
  ipcMain.handle("capture-underlay", async () => {
   if (!mainWindow) return null;
-
-  mainWindow.hide();
-  await new Promise(r => setTimeout(r, 16));
-
+  mainWindow.setOpacity(0);
+  await new Promise(resolve => setTimeout(resolve, 1)); 
   const bounds = mainWindow.getBounds();
   const display = screen.getDisplayMatching(bounds);
   const scale = display.scaleFactor || 1;
-
-  // Windows-safe fallback (display.size may be undefined)
   const { width, height } = display.bounds;
 
   const sources = await desktopCapturer.getSources({
@@ -82,13 +75,11 @@ mainWindow.setIgnoreMouseEvents(false, { forward: true });
     height: Math.round(bounds.height * scale),
   };
 
-  console.log("CROPPING", crop);
-
   const cropped = img.crop(crop);
-
-  mainWindow.show();
+  mainWindow.setOpacity(1); 
   return cropped.toDataURL();
 });
+
 ipcMain.handle("get-window-size", () => {
   return mainWindow.getBounds();
 });
