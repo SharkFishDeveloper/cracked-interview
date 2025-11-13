@@ -5,5 +5,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   resizeWindow: (width, height) =>
     ipcRenderer.invoke("resize-window", { width, height }),
   captureUnderlay: () => ipcRenderer.invoke("capture-underlay"),
-  onToggleVisibility: (callback) => ipcRenderer.on('toggle-visibility', callback)
+  moveWindow: (dx, dy) =>
+    ipcRenderer.invoke("move-window", { dx, dy }),
+  onToggleVisibility: (callback) =>
+    ipcRenderer.on("toggle-visibility", callback)
 });

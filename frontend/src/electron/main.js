@@ -125,6 +125,19 @@ function createWindow() {
   ipcMain.handle("get-window-size", () => {
     return mainWindow.getBounds();
   });
+
+  ipcMain.handle("move-window", (_evt, { dx, dy }) => {
+  if (!mainWindow) return;
+
+  const { x, y, width, height } = mainWindow.getBounds();
+
+  mainWindow.setBounds({
+    x: x + dx,
+    y: y + dy,
+    width,
+    height
+  });
+});
 }
 
 app.whenReady().then(() => {

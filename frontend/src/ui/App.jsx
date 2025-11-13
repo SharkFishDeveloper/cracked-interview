@@ -42,6 +42,29 @@ export default function App() {
     }
   }, []); // Empty dependency array means this runs once on mount
 
+
+  // -----------MOVEMENT--------------
+  useEffect(() => {
+  const step = 15;
+
+  const handler = (e) => {
+    if (!e.ctrlKey || !e.altKey) return;
+
+    if (e.key === "ArrowUp") {
+      window.electronAPI.moveWindow(0, -step);
+    } else if (e.key === "ArrowDown") {
+      window.electronAPI.moveWindow(0, step);
+    } else if (e.key === "ArrowLeft") {
+      window.electronAPI.moveWindow(-step, 0);
+    } else if (e.key === "ArrowRight") {
+      window.electronAPI.moveWindow(step, 0);
+    }
+  };
+
+  window.addEventListener("keydown", handler);
+  return () => window.removeEventListener("keydown", handler);
+}, []);
+
   // ------------------- WebSocket -------------------
   const connectWebSocket = () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
