@@ -65,6 +65,29 @@ export default function App() {
   return () => window.removeEventListener("keydown", handler);
 }, []);
 
+  useEffect(() => {
+  const step = 20;
+
+  const handler = async (e) => {
+    if (!e.ctrlKey || !e.shiftKey) return; // resize combo
+
+    const size = await window.electronAPI.getWindowSize();
+    let { width, height } = size;
+
+    if (e.key === "ArrowRight") width += step;
+    else if (e.key === "ArrowLeft") width -= step;
+    else if (e.key === "ArrowDown") height += step;
+    else if (e.key === "ArrowUp") height -= step;
+    else return;
+
+    window.electronAPI.resizeWindow(width, height);
+  };
+
+  window.addEventListener("keydown", handler);
+  return () => window.removeEventListener("keydown", handler);
+}, []);
+
+
   // ------------------- WebSocket -------------------
   const connectWebSocket = () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
