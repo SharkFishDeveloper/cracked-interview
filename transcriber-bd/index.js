@@ -5,11 +5,26 @@ import {
   TranscribeStreamingClient,
   StartStreamTranscriptionCommand,
 } from "@aws-sdk/client-transcribe-streaming";
-
+import {
+  TextractClient,
+  AnalyzeDocumentCommand,
+} from "@aws-sdk/client-textract";
+import OpenAI from "openai";
+import { promptAi } from "./promptAi.js";
 dotenv.config();
+const openaiClient = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
 const REGION = process.env.AWS_REGION || "ap-south-1";
 const transcribeClient = new TranscribeStreamingClient({ region: REGION });
-
+const textractClient = new TextractClient({
+  region: REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID_OCR,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY_OCR,
+  },
+});
 // ---------- Async queue ----------
 class IncomingQueue {
   constructor() {
@@ -66,8 +81,52 @@ wssUI.on("connection", (ws) => {
   uiClients.add(ws);
   ws.send(JSON.stringify({ type: "info", message: "UI connected" }));
   ws.on("close", () => uiClients.delete(ws));
-});
+   // ------------------ NEW: ASK AI HANDLER ------------------
+  ws.on("message", async (raw) => {
+    let msg;
+    try {
+      msg = JSON.parse(raw);
+    } catch (e) {
+      return;
+    }
 
+    if (msg.type === "ask_ai") {
+  const userText = msg.text?.trim();
+  if (!userText) return;
+
+
+  try {
+    const response = await openaiClient.responses.create({
+    model: "gpt-4o-mini",
+    input: [
+      {
+        role: "system",
+        content: promptAi
+      },
+      {
+        role: "user",
+        content: userText
+      }
+    ]
+    });
+    const answer = response.output_text || "No answer";
+
+    ws.send(JSON.stringify({
+      type: "ai_answer",
+      text: answer,
+    }));
+
+  } catch (err) {
+    // console.error("❌ OpenAI Error:", err);
+
+    ws.send(JSON.stringify({
+      type: "ai_answer",
+      text: "AI failed: " + err.message,
+    }));
+  }
+}
+  });
+});
 // Broadcast helper
 function broadcast(obj) {
   const msg = JSON.stringify(obj);
@@ -122,6 +181,86 @@ wssTranscribe.on("connection", async (ws) => {
     broadcast({ type: "error", message: err.message });
   } finally {
     queue.close();
+  }
+});
+
+
+// -------------- AWS TEXTRACT OCR ENDPOINT --------------
+httpServer.on("request", async (req, res) => {
+  // --------- GLOBAL CORS FIX ALWAYS RUNS ----------
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  
+  // preflight
+  if (req.method === "OPTIONS") {
+    res.writeHead(200);
+    return res.end();
+  }
+  // ------------------------------------------------
+
+
+  // ----------- OCR ENDPOINT -----------------------
+  if (req.method === "POST" && req.url === "/ocr") {
+    console.log("📩 OCR POST hit");
+
+    let body = "";
+
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+
+    req.on("end", async () => {
+      try {
+        const { image } = JSON.parse(body);
+
+        if (!image) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "Missing image" }));
+        }
+
+        // decode data URL
+        const base64data = image.replace(/^data:image\/\w+;base64,/, "");
+        const buffer = Buffer.from(base64data, "base64");
+
+        // --- Textract ---
+        const command = new AnalyzeDocumentCommand({
+          Document: { Bytes: buffer },
+          FeatureTypes: ["FORMS", "TABLES"],
+        });
+
+        const textractResponse = await textractClient.send(command);
+
+        let extractedText = "";
+        if (textractResponse?.Blocks) {
+          extractedText = textractResponse.Blocks
+            .filter((b) => b.BlockType === "LINE")
+            .map((b) => b.Text)
+            .join("\n");
+        }
+
+        // ✔ CORS headers MUST be here too
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        });
+
+        return res.end(JSON.stringify({ text: extractedText || "" }));
+      } catch (err) {
+        console.error("❌ Textract error:", err);
+
+        res.writeHead(500, {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        });
+        return res.end(
+          JSON.stringify({
+            error: "Textract failed",
+            details: err.message,
+          })
+        );
+      }
+    });
   }
 });
 

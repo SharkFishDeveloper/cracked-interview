@@ -12,9 +12,10 @@
   "description": "",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.929.0",
-    "@aws-sdk/client-textract": "^3.929.0",
+    "@aws-sdk/client-textract": "^3.930.0",
     "@aws-sdk/client-transcribe-streaming": "^3.929.0",
     "dotenv": "^17.2.3",
+    "openai": "^6.8.1",
     "ws": "^8.18.3"
   }
 }

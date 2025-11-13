@@ -18,7 +18,7 @@ function createWindow() {
 
     // IMPORTANT TO HIDE FROM ALT+TAB
     show: false,
-    focusable: false,  
+    focusable: true,  
 
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),

@@ -1,11 +1,18 @@
 import { useState, useEffect, useRef } from "react";
+import { runOCRRequest } from "./ocr";
 
 const WS_URL = "ws://localhost:8080/ui";
+const btn = {
+  padding: "2px 6px",
+  fontSize: "10px",
+  borderRadius: "4px",
+  background: "rgba(255,255,255,0.15)",
+  color: "white",
+  border: "1px solid rgba(255,255,255,0.3)",
+  cursor: "pointer",
+  whiteSpace: "nowrap",    // prevents breaking words
+};
 
-
-console.log("---- Overlay Debug ----");
-console.log("window.electronAPI =", window.electronAPI);
-console.log("typeof window.electronAPI =", typeof window.electronAPI);
 export default function App() {
   const [connected, setConnected] = useState(false);
   const [isReceivingAudio, setIsReceivingAudio] = useState(false);
@@ -13,8 +20,11 @@ export default function App() {
   const [partialTranscript, setPartialTranscript] = useState("");
   const [aiResponse, setAiResponse] = useState("");
   const [shots, setShots] = useState([]);
-  const overlayRef = useRef(null);
 
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const ocrAbortRef = useRef(null);
+
+  const overlayRef = useRef(null);
   const scrollRef = useRef(null);
   const wsRef = useRef(null);
   const audioTimer = useRef(null);
@@ -50,6 +60,7 @@ export default function App() {
 
       if (msg.type === "transcript") {
         const text = msg.transcript.trim();
+
         if (msg.isPartial) {
           setPartialTranscript(text);
         } else {
@@ -69,7 +80,7 @@ export default function App() {
       }
 
       if (msg.type === "ai_answer") {
-        setAiResponse(msg.text || "⚠️ No response");
+        setAiResponse(msg.text || "No response");
       }
     };
   };
@@ -83,106 +94,114 @@ export default function App() {
 
   const askAI = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      alert("WS not connected");
+      // alert("WS not connected");
       return;
     }
     const full = `${finalTranscript} ${partialTranscript}`.trim();
     wsRef.current.send(JSON.stringify({ type: "ask_ai", text: full }));
-    setAiResponse("🤔 Thinking...");
+    setAiResponse("Thinking...");
   };
 
-  // Scroll the transcript as text grows
+  // Scroll transcript as text grows
   useEffect(() => {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
-  }, [finalTranscript, partialTranscript, shots]);
+  }, [finalTranscript, partialTranscript, shots, ocrLoading]);
 
   // ------------------- Screen Capture -------------------
-const screenStreamRef = useRef(null);
+  const captureUnderlay = async () => {
+    try {
+      if (!window.electronAPI?.captureUnderlay) return;
 
-  const getStream = async () => {
-    if (screenStreamRef.current) return screenStreamRef.current;
-
-    const { sourceId } = await window.electronAPI.getUnderlayCropInfo();
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        mandatory: {
-          chromeMediaSource: "desktop",
-          chromeMediaSourceId: sourceId,
-        },
-      },
-    });
-
-    screenStreamRef.current = stream;
-    return stream;
+      const dataUrl = await window.electronAPI.captureUnderlay();
+      setShots((prev) => [dataUrl, ...prev]);
+    } catch (err) {
+      console.error("Capture failed:", err);
+    }
   };
 
-  const captureUnderlay = async () => {
-  try {
-    console.log("➡️ Calling captureUnderlay");
-
-    if (!window.electronAPI) {
-      console.error("❌ electronAPI missing");
-      return;
-    }
-
-    if (!window.electronAPI.captureUnderlay) {
-      console.error("❌ captureUnderlay not available");
-      return;
-    }
-
-    const dataUrl = await window.electronAPI.captureUnderlay();
-    console.log("Got screenshot:", dataUrl.substring(0, 80));
-
-    setShots(prev => [dataUrl, ...prev]);
-  } catch (err) {
-    console.error("Screen capture failed:", err);
-  }
+  const handleStartPause = () => {
+  if (!connected) connectWebSocket();
+  else disconnectWebSocket();
 };
 
+const handleOCRToggle = () => {
+  if (!shots[0]) return;
+  if (!ocrLoading) runOCR();
+  else cancelOCR();
+};
 
+  // ------------------- Remove Screenshot -------------------
+  const removeScreenshot = () => {
+    setShots([]); // removes all screenshots
+  };
 
+  // ------------------- Clear Transcript History -------------------
+  const clearHistory = () => {
+    setFinalTranscript("");
+    setPartialTranscript("");
+  };
+
+  // ------------------- OCR Logic -------------------
+  const runOCR = async () => {
+    if (!shots[0]) return alert("Capture first!");
+
+    if (ocrAbortRef.current) ocrAbortRef.current.abort();
+
+    const controller = new AbortController();
+    ocrAbortRef.current = controller;
+    setOcrLoading(true);
+
+    try {
+      const text = await runOCRRequest(shots[0], controller.signal);
+
+      if (text) {
+        setFinalTranscript((p) => (p + "\n" + text).trim());
+      }
+    } catch (err) {
+      if (err.name !== "AbortError") console.error("OCR error:", err);
+    }
+
+    ocrAbortRef.current = null;
+    setOcrLoading(false);
+  };
+
+  const cancelOCR = () => {
+    if (ocrAbortRef.current) {
+      ocrAbortRef.current.abort();
+      ocrAbortRef.current = null;
+      setOcrLoading(false);
+    }
+  };
 
   // ------------------- Resize Logic -------------------
- // ------------------- Resize Logic -------------------
   const resizing = useRef(false);
   const startPos = useRef({ x: 0, y: 0 });
   const startSize = useRef({ w: 0, h: 0 });
 
-const onResizeStart = async (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  resizing.current = true;
+  const onResizeStart = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizing.current = true;
 
-  const size = await window.electronAPI.getWindowSize();
+    const size = await window.electronAPI.getWindowSize();
+    startPos.current = { x: e.clientX, y: e.clientY };
+    startSize.current = { w: size.width, h: size.height };
 
-  startPos.current = { x: e.clientX, y: e.clientY };
-  startSize.current = {
-    w: size.width,
-    h: size.height,
+    window.addEventListener("mousemove", onResizeMove);
+    window.addEventListener("mouseup", onResizeEnd);
   };
 
-  window.addEventListener("mousemove", onResizeMove);
-  window.addEventListener("mouseup", onResizeEnd);
-};
   const onResizeMove = (e) => {
     if (!resizing.current) return;
 
     const dx = e.clientX - startPos.current.x;
     const dy = e.clientY - startPos.current.y;
 
-    const MIN_W = 200;
-    const MIN_H = 150;
+    const w = Math.max(200, startSize.current.w + dx);
+    const h = Math.max(150, startSize.current.h + dy);
 
-    const w = Math.max(MIN_W, startSize.current.w + dx);
-    const h = Math.max(MIN_H, startSize.current.h + dy);
-
-    if (window.electronAPI?.resizeWindow) {
-      window.electronAPI.resizeWindow(w, h);
-    } else {
-      window.resizeTo(w, h);
-    }
+    if (window.electronAPI?.resizeWindow) window.electronAPI.resizeWindow(w, h);
+    else window.resizeTo(w, h);
   };
 
   const onResizeEnd = () => {
@@ -190,7 +209,6 @@ const onResizeStart = async (e) => {
     window.removeEventListener("mousemove", onResizeMove);
     window.removeEventListener("mouseup", onResizeEnd);
   };
-
 
   // ------------------- UI -------------------
   return (
@@ -208,7 +226,7 @@ const onResizeStart = async (e) => {
         userSelect: "none",
       }}
     >
-      {/* Drag pill */}
+      {/* Drag bar */}
       <div
         style={{
           WebkitAppRegion: "drag",
@@ -248,55 +266,94 @@ const onResizeStart = async (e) => {
           WebkitAppRegion: "no-drag",
         }}
       >
-        {/* Status Row */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 4,
-          }}
-        >
-          {/* Status Dots */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <div
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: connected ? "#4ade80" : "#ef4444",
-              }}
-            />
-            <div
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: isReceivingAudio ? "#4ade80" : "#ef4444",
-              }}
-            />
-          </div>
 
-          {/* Buttons */}
-          <div style={{ display: "flex", gap: 4 }}>
-            <button style={{ padding: "2px 6px" }} onClick={captureUnderlay}>
-              Capture sds
-            </button>
-            <button style={{ padding: "2px 6px" }} onClick={connectWebSocket} disabled={connected}>
-              Start
-            </button>
-            <button style={{ padding: "2px 6px" }} onClick={disconnectWebSocket} disabled={!connected}>
-              Stop
-            </button>
-            <button style={{ padding: "2px 6px" }} onClick={askAI} disabled={!connected}>
-              Ask
-            </button>
-          </div>
-        </div>
+        
+ {/* Top Buttons */}
+<div
+  style={{
+    display: "flex",
+    alignItems: "center",
+    marginBottom: 4,
+    gap: 0, // No space between dots and buttons
+  }}
+>
+  {/* Status Dots */}
+  <div
+    style={{
+      display: "flex",
+      alignItems: "center",
+      gap: 4,       // Spacing only between the dots
+      marginRight: 4, // VERY tiny space so dots do not visually merge with the button
+    }}
+  >
+    <div
+      style={{
+        width: 8,
+        height: 8,
+        borderRadius: "50%",
+        background: connected ? "#4ade80" : "#ef4444",
+      }}
+    />
+    <div
+      style={{
+        width: 8,
+        height: 8,
+        borderRadius: "50%",
+        background: isReceivingAudio ? "#4ade80" : "#ef4444",
+      }}
+    />
+  </div>
 
-        {/* Panels */}
+  {/* Buttons — Touching dots, compact, responsive */}
+  <div
+    style={{
+      display: "flex",
+      flexWrap: "wrap",
+      gap: 4,
+      maxWidth: "100%",
+      justifyContent: "flex-start",
+    }}
+  >
+    {/* Start / Pause Toggle */}
+    <button style={btn} onClick={handleStartPause}>
+      {connected ? "Pause" : "Start"}
+    </button>
+
+    {/* Capture */}
+    <button style={btn} onClick={captureUnderlay}>
+      Capture
+    </button>
+
+    {/* Remove screenshot */}
+    <button style={btn} onClick={removeScreenshot} disabled={!shots.length}>
+      Remove Img
+    </button>
+
+    {/* OCR Toggle */}
+    <button
+      style={btn}
+      onClick={handleOCRToggle}
+      disabled={!shots[0]}
+    >
+      {ocrLoading ? "Stop OCR" : "OCR"}
+    </button>
+
+    {/* Clear all transcripts */}
+    <button style={btn} onClick={clearHistory}>
+      Clear
+    </button>
+
+    {/* Ask AI */}
+    <button style={btn} onClick={askAI} disabled={!connected}>
+      Ask
+    </button>
+  </div>
+</div>
+
+
+        {/* Two Panels */}
         <div style={{ flex: 1, display: "flex", gap: 8, overflow: "hidden" }}>
-          {/* LEFT PANEL - Transcript + Captures */}
+          {/* LEFT PANEL */}
           <div style={{ flexBasis: "35%" }}>
             <div
               ref={scrollRef}
@@ -311,25 +368,28 @@ const onResizeStart = async (e) => {
                 background: "rgba(255,255,255,0.08)",
               }}
             >
-              {/* transcript text */}
-              {(finalTranscript || partialTranscript) && (
-                <div style={{ marginBottom: 6 }}>
-                  {finalTranscript} {partialTranscript}
-                </div>
-              )}
               {shots[0] && (
-                <div style={{ marginTop: 6 }}>
-                  <img
-                    src={shots[0]}
-                    alt="underlay capture"
-                    style={{ width: "100%", borderRadius: 6, display: "block", pointerEvents: "none" }}
-                  />
+                <img
+                  src={shots[0]}
+                  style={{
+                    width: "100%",
+                    borderRadius: 6,
+                    marginBottom: 8,
+                    pointerEvents: "none",
+                  }}
+                />
+              )}
+
+              {(finalTranscript || partialTranscript) && (
+                <div style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>
+                  {finalTranscript}
+                  {partialTranscript && " " + partialTranscript}
                 </div>
               )}
             </div>
           </div>
 
-          {/* RIGHT PANEL - AI Response */}
+          {/* RIGHT PANEL */}
           <div style={{ flex: 1 }}>
             <div
               style={{
@@ -338,7 +398,8 @@ const onResizeStart = async (e) => {
                 border: "1.5px solid white",
                 borderRadius: 8,
                 padding: 6,
-                fontSize: 13,
+                fontSize: 12,
+                fontFamily: "'JetBrains Mono', Consolas, 'Courier New', monospace",
                 background: "rgba(255,255,255,0.08)",
               }}
             >
@@ -347,23 +408,22 @@ const onResizeStart = async (e) => {
           </div>
         </div>
 
-        {/* Resize pill */}
+        {/* Resize handle */}
         <div
-            onMouseDown={onResizeStart}
-            style={{
-              position: "absolute",
-              bottom: 10,
-              right: 18,
-              width: 26,
-              height: 26,
-              borderRadius: "50%",
-              background: "white",
-              boxShadow: "0 0 10px rgba(255,255,255,0.9)",
-              cursor: "nwse-resize",
-              WebkitAppRegion: "no-drag",
-              pointerEvents: "auto",    // pill stays clickable
-            }}
-          />
+          onMouseDown={onResizeStart}
+          style={{
+            position: "absolute",
+            bottom: 10,
+            right: 18,
+            width: 26,
+            height: 26,
+            borderRadius: "50%",
+            background: "white",
+            boxShadow: "0 0 10px rgba(255,255,255,0.9)",
+            cursor: "nwse-resize",
+            WebkitAppRegion: "no-drag",
+          }}
+        />
       </div>
     </div>
   );
