@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 
-
 const WS_URL = "ws://localhost:8080/ui";
 
 export default function App() {
@@ -14,6 +13,7 @@ export default function App() {
   const wsRef = useRef(null);
   const audioTimer = useRef(null);
 
+  // ------------------- WebSocket -------------------
   const connectWebSocket = () => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
     const ws = new WebSocket(WS_URL);
@@ -30,13 +30,12 @@ export default function App() {
       setConnected(false);
       setIsReceivingAudio(false);
     };
-
     ws.onerror = () => setConnected(false);
 
-    ws.onmessage = (event) => {
+    ws.onmessage = (ev) => {
       let msg;
       try {
-        msg = JSON.parse(event.data);
+        msg = JSON.parse(ev.data);
       } catch {
         return;
       }
@@ -46,9 +45,9 @@ export default function App() {
         if (msg.isPartial) {
           setPartialTranscript(text);
         } else {
-          setFinalTranscript((prev) => {
-            const newText = (prev + " " + text).trim();
-            const words = newText.split(/\s+/);
+          setFinalTranscript((p) => {
+            const combined = (p + " " + text).trim();
+            const words = combined.split(/\s+/);
             return words.slice(-150).join(" ");
           });
           setPartialTranscript("");
@@ -62,27 +61,25 @@ export default function App() {
       }
 
       if (msg.type === "ai_answer") {
-        setAiResponse(msg.text || "⚠️ No AI response received.");
+        setAiResponse(msg.text || "⚠️ No response");
       }
     };
   };
 
   const disconnectWebSocket = () => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
+    wsRef.current?.close();
+    wsRef.current = null;
     setConnected(false);
     setIsReceivingAudio(false);
   };
 
   const askAI = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      alert("WebSocket not connected yet!");
+      alert("WS not connected");
       return;
     }
-    const fullText = (finalTranscript + " " + partialTranscript).trim();
-    wsRef.current.send(JSON.stringify({ type: "ask_ai", text: fullText }));
+    const full = `${finalTranscript} ${partialTranscript}`.trim();
+    wsRef.current.send(JSON.stringify({ type: "ask_ai", text: full }));
     setAiResponse("🤔 Thinking...");
   };
 
@@ -90,193 +87,167 @@ export default function App() {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
   }, [finalTranscript, partialTranscript]);
 
-  const statusColor = connected ? "#4ade80" : "#ef4444";
-  const audioColor = isReceivingAudio ? "#4ade80" : "#9ca3af";
-
-  // ---- Resizing logic ----
-  const resizingRef = useRef(false);
+  // ------------------- Resize Logic -------------------
+  const resizing = useRef(false);
   const startPos = useRef({ x: 0, y: 0 });
-  const startSize = useRef({ width: 0, height: 0 });
+  const startSize = useRef({ w: 0, h: 0 });
 
-  const handleMouseDown = (e) => {
+  const onResizeStart = (e) => {
     e.preventDefault();
-    resizingRef.current = true;
+    e.stopPropagation();
+    resizing.current = true;
+
     startPos.current = { x: e.clientX, y: e.clientY };
+    startSize.current = {
+      w: window.innerWidth,
+      h: window.innerHeight,
+    };
 
-    // Get current window size
-    const { innerWidth, innerHeight } = window;
-    startSize.current = { width: innerWidth, height: innerHeight };
-
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("mousemove", onResizeMove);
+    window.addEventListener("mouseup", onResizeEnd);
   };
 
-  const handleMouseMove = (e) => {
-    if (!resizingRef.current) return;
+  const onResizeMove = (e) => {
+    if (!resizing.current) return;
+
     const dx = e.clientX - startPos.current.x;
     const dy = e.clientY - startPos.current.y;
 
-    const newWidth = Math.max(300, startSize.current.width + dx);
-    const newHeight = Math.max(200, startSize.current.height + dy);
+    const w = Math.max(360, startSize.current.w + dx);
+    const h = Math.max(220, startSize.current.h + dy);
 
-    // Use Electron remote API to resize the window dynamically
-    window.resizeTo(newWidth, newHeight);
+    if (window.electronAPI?.resizeWindow) {
+      window.electronAPI.resizeWindow(w, h);
+    } else {
+      window.resizeTo(w, h);
+    }
   };
 
-  const handleMouseUp = () => {
-    resizingRef.current = false;
-    document.removeEventListener("mousemove", handleMouseMove);
-    document.removeEventListener("mouseup", handleMouseUp);
+  const onResizeEnd = () => {
+    resizing.current = false;
+    window.removeEventListener("mousemove", onResizeMove);
+    window.removeEventListener("mouseup", onResizeEnd);
   };
 
+  // ------------------- UI -------------------
   return (
     <div
       style={{
-        fontFamily: "Inter, sans-serif",
+        position: "fixed",
+        inset: 0,                     // <-- FULL WINDOW ALWAYS
         background: "transparent",
         color: "white",
-        height: "100%",
-        width: "100%",
-        margin: 0,
-        padding: 0,
-        overflow: "hidden",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
+        overflow: "hidden",
+        paddingTop: 2,
+        padding:6,
         userSelect: "none",
-        position: "relative",
       }}
     >
-      {/* === Drag Pill === */}
+      {/* Drag pill */}
       <div
         style={{
           WebkitAppRegion: "drag",
-          width: "120px",
-          height: "20px",
-          background: "rgba(255,255,255,0.2)",
+          width: "50%",
+          height: 26,
+          borderRadius: 14,
           border: "2px solid white",
-          borderRadius: "20px",
-          marginBottom: "10px",
-          cursor: "move",
+          background: "rgba(255,255,255,0.12)",
+          marginBottom: 8,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
         }}
-      ></div>
+      >
+        <div
+          style={{
+            width: "80%",
+            height: 10,
+            borderRadius: 6,
+            background: "rgba(255,255,255,0.18)",
+          }}
+        />
+      </div>
 
+      {/* Main box */}
       <div
         style={{
-          width: "90%",
-          maxWidth: 900,
+          width: "95%",
+          flex: 1,
           border: "1.5px solid white",
-          borderRadius: 10,
-          padding: "1rem",
-          background: "transparent",
+          borderRadius: 12,
+          padding: 2,
+          display: "flex",
+          flexDirection: "column",
+          overflowY: "auto",      // ✅ FIX RESPONSIVENESS
+          overflowX: "hidden",
           WebkitAppRegion: "no-drag",
         }}
       >
-        <h3 style={{ marginBottom: 6, textAlign: "center", fontSize: "1rem" }}>
-          Live Transcriber + AI Dashboard
-        </h3>
-
-        {/* Status bar */}
+        {/* Status + Buttons */}
         <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            fontSize: 12,
-            marginBottom: 10,
-          }}
-        >
-          <span>
-            WebSocket:{" "}
-            <strong style={{ color: statusColor }}>
-              {connected ? "Connected" : "Disconnected"}
-            </strong>
-          </span>
-          <span>
-            Audio:{" "}
-            <strong style={{ color: audioColor }}>
-              {isReceivingAudio ? "Receiving 🎙️" : "Idle"}
-            </strong>
-          </span>
-        </div>
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 4,     // ↓ minimal spacing
+          padding: 0,
+        }}
+      >
+  {/* Ultra-compact status dots */}
+  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+    <div
+      style={{
+        width: 8,
+        height: 8,
+        borderRadius: "50%",
+        background: connected ? "#4ade80" : "#ef4444",
+        boxShadow: connected
+          ? "0 0 4px rgba(74,222,128,0.8)"
+          : "0 0 4px rgba(239,68,68,0.8)",
+      }}
+    />
+    <div
+      style={{
+        width: 8,
+        height: 8,
+        borderRadius: "50%",
+        background: isReceivingAudio ? "#4ade80" : "#ef4444",
+        boxShadow: isReceivingAudio
+          ? "0 0 4px rgba(74,222,128,0.8)"
+          : "0 0 4px rgba(239,68,68,0.8)",
+      }}
+    />
+  </div>
 
-        {/* Buttons */}
-        <div style={{ marginBottom: 12, display: "flex", gap: 6 }}>
-          <button
-            onClick={connectWebSocket}
-            disabled={connected}
-            style={{
-              flex: 1,
-              padding: "6px 0",
-              background: "transparent",
-              color: "white",
-              border: "1.5px solid white",
-              borderRadius: 6,
-              cursor: connected ? "not-allowed" : "pointer",
-              fontSize: "0.85rem",
-              fontWeight: 600,
-            }}
-          >
-            Start
-          </button>
+  {/* Buttons */}
+  <div style={{ display: "flex", gap: 4 }}>
+    <button onClick={connectWebSocket} disabled={connected} style={{ padding: "2px 6px" }}>
+      Start
+    </button>
+    <button onClick={disconnectWebSocket} disabled={!connected} style={{ padding: "2px 6px" }}>
+      Stop
+    </button>
+    <button onClick={askAI} disabled={!connected} style={{ padding: "2px 6px" }}>
+      Ask
+    </button>
+  </div>
+</div>
 
-          <button
-            onClick={disconnectWebSocket}
-            disabled={!connected}
-            style={{
-              flex: 1,
-              padding: "6px 0",
-              background: "transparent",
-              color: "white",
-              border: "1.5px solid white",
-              borderRadius: 6,
-              cursor: !connected ? "not-allowed" : "pointer",
-              fontSize: "0.85rem",
-              fontWeight: 600,
-            }}
-          >
-            Stop
-          </button>
-
-          <button
-            onClick={askAI}
-            disabled={!connected}
-            style={{
-              flex: 1,
-              padding: "6px 0",
-              background: "transparent",
-              color: "white",
-              border: "1.5px solid white",
-              borderRadius: 6,
-              cursor: !connected ? "not-allowed" : "pointer",
-              fontSize: "0.85rem",
-              fontWeight: 600,
-            }}
-          >
-            Ask AI
-          </button>
-        </div>
-
-        {/* Split layout */}
-        <div style={{ display: "flex", gap: 12 }}>
-          {/* Left: Transcript */}
-          <div style={{ flex: "0 0 30%" }}>
-            <h4 style={{ marginBottom: 6, fontSize: "0.9rem" }}>
-              User Transcript
-            </h4>
+        {/* Panels */}
+        <div style={{ flex: 1, display: "flex", gap: 12, overflow: "hidden" }}>
+          <div style={{ flexBasis: "35%" }}>
             <div
               ref={scrollRef}
               style={{
-                background: "transparent",
-                color: "white",
-                border: "1.5px solid white",
-                borderRadius: 6,
-                height: 250,
+                height: "100%",
                 overflowY: "auto",
-                fontFamily: "monospace",
-                whiteSpace: "pre-wrap",
-                fontSize: 12,
+                border: "1.5px solid white",
+                borderRadius: 10,
                 padding: 10,
+                background: "rgba(255,255,255,0.06)",
               }}
             >
               {finalTranscript || partialTranscript
@@ -285,44 +256,52 @@ export default function App() {
             </div>
           </div>
 
-          {/* Right: AI Response */}
-          <div style={{ flex: "0 0 70%" }}>
-            <h4 style={{ marginBottom: 6, fontSize: "0.9rem" }}>AI Response</h4>
+          <div style={{ flex: 1 }}>
             <div
               style={{
-                background: "transparent",
-                color: "white",
-                border: "1.5px solid white",
-                borderRadius: 6,
-                height: 250,
+                height: "100%",
                 overflowY: "auto",
-                fontFamily: "Inter, sans-serif",
-                whiteSpace: "pre-wrap",
-                fontSize: 13,
+                border: "1.5px solid white",
+                borderRadius: 10,
                 padding: 10,
+                background: "rgba(255,255,255,0.06)",
               }}
             >
               {aiResponse || "No AI answer yet."}
             </div>
           </div>
         </div>
-      </div>
 
-      {/* === Bottom-right resize handle === */}
-      <div
-        onMouseDown={handleMouseDown}
-        style={{
-          position: "absolute",
-          bottom: "6px",
-          right: "6px",
-          width: "16px",
-          height: "16px",
-          borderRadius: "50%",
-          background: "white",
-          cursor: "nwse-resize",
-          WebkitAppRegion: "no-drag",
-        }}
-      ></div>
+        <div
+          style={{
+            position: "absolute",
+            bottom: 10,
+            right: 10,
+            fontSize: 12,
+            opacity: 0.8,
+            pointerEvents: "none",   // allow underlying drag area to work
+          }}
+          >
+        </div>
+
+          <div
+            onMouseDown={onResizeStart}
+            style={{
+              position: "absolute",
+              bottom: 10,
+              right: 18,
+              width: 26,
+              height: 26,
+              borderRadius: "50%",
+              background: "white",
+              boxShadow: "0 0 10px rgba(255,255,255,0.9)",
+              cursor: "nwse-resize",
+              WebkitAppRegion: "no-drag",
+              pointerEvents: "auto",    // pill stays clickable
+            }}
+          />
+
+      </div>
     </div>
   );
 }

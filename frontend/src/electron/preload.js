@@ -1,3 +1,7 @@
-import { ipcRenderer} from "electron";
+import { contextBridge, ipcRenderer } from "electron";
 
-ipcRenderer.send("resize-window", { width, height });
+contextBridge.exposeInMainWorld("electronAPI", {
+  resizeWindow: (width, height) => {
+    ipcRenderer.send("resize-window", { width, height });
+  },
+});

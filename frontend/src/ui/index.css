@@ -1,3 +1,8 @@
-html, body, #root {
-  background: transparent !important;
-}
+  html, body {
+    height: 100%;
+    margin: 2;
+    padding: 8;
+    overflow: hidden !important;
+    background: transparent;
+    /* background: transparent !important; */
+  }

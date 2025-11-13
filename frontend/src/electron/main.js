@@ -7,9 +7,12 @@ const __dirname = path.dirname(__filename);
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
-    width: 400,
     height: 300,
+    width: 400,
+    minHeight: 200,
+    minWidth: 300,
     transparent: true,
+    useContentSize: true,
     frame: false,
     resizable: true,
     titleBarStyle: "hidden",
@@ -25,11 +28,15 @@ function createWindow() {
   });
 
   mainWindow.loadURL("http://localhost:5173");
+  ipcMain.handle("resize-window", (_evt, { w, h }) => {
+    if (!mainWindow) return;
+    const minW = 100;
+    const minH = 100;
+    const W = Math.max(minW, Math.floor(Number(w) || 0));
+    const H = Math.max(minH, Math.floor(Number(h) || 0));
+    mainWindow.setSize(W, H, true);
+  });
 }
 
 app.whenReady().then(createWindow);
 
-ipcMain.on("resize-window", (e, { width, height }) => {
-  const win = BrowserWindow.getFocusedWindow();
-  if (win) win.setSize(width, height);
-});
