@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "dev1": "powershell -Command \"cd 'C:/Users/shahz/Desktop/cracked/obs-streamer'; ./obs.bat\"",
-    "dev2": "powershell -Command \"Start-Sleep -Seconds 5; cd 'C:/Users/shahz/Desktop/cracked/frontend'; npm run dev\"",
-    "dev3": "powershell -Command \"Start-Sleep -Seconds 5; cd 'C:/Users/shahz/Desktop/cracked/transcriber-bd'; npm run dev\"",
-    "dev4": "powershell -Command \"Start-Sleep -Seconds 5; cd 'C:/Users/shahz/Desktop/cracked/obs-streamer'; npm run dev\"",
-    "obs": "powershell -Command \"cd 'C:/Users/shahz/Desktop/cracked/obs-streamer'; ./obs.bat\"",
+    "dev1": "powershell -Command cd 'C:/Users/shahz/Desktop/cracked/frontend'; npm run dev\"",
+    "dev2": "powershell -Command \"Start-Sleep -Seconds 5; cd 'C:/Users/shahz/Desktop/cracked/transcriber-bd'; npm run dev\"",
+    "dev3": "powershell -Command \"Start-Sleep -Seconds 5; cd 'C:/Users/shahz/Desktop/cracked/obs-streamer'; npm run dev\"",
+    "dev4": "powershell -Command \"cd 'C:/Users/shahz/Desktop/cracked/obs-streamer'; ./obs.bat\"", 
+    "obs": "powershell -Command \"Start-Sleep -Seconds 5;\"cd 'C:/Users/shahz/Desktop/cracked/obs-streamer'; ./obs.bat\"",
     "all": "concurrently \"npm run dev1\" \"npm run dev2\" \"npm run dev3\" \"npm run dev4\""
   },
   "repository": {

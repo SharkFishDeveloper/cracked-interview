@@ -1,4 +1,0 @@
-    "dev2": "timeout /t 5 /nobreak && cd C:/path/to/project2 && npm start",
-    "dev3": "timeout /t 10 /nobreak && cd C:/path/to/project3 && npm start",
-
-    "dev:all": "concurrently \"npm run dev1\" \"npm run dev2\" \"npm run dev3\""

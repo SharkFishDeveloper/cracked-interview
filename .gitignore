@@ -9,6 +9,7 @@ pnpm-debug.log*
 package-lock.json
 pnpm-lock.yaml
 yarn.lock
+list.js
 
 # Optional: keep lockfiles if you want reproducible installs
 # Remove the above 3 lines if you *do* want them committed
