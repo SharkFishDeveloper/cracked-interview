@@ -1,9 +1,6 @@
 @echo off
-REM === OBS Hidden Stream Toggle (Fixed Version) ===
-
 setlocal enabledelayedexpansion
 
-REM Path to your OBS installation
 set "OBS_PATH=D:\obs-record\obs-studio\bin\64bit"
 
 REM Check if OBS is running
@@ -11,7 +8,10 @@ tasklist /FI "IMAGENAME eq obs64.exe" 2>nul | find /I "obs64.exe" >nul
 if %errorlevel%==0 (
     echo 🔴 OBS is running — stopping it now...
     taskkill /IM obs64.exe /F >nul 2>&1
-    timeout /t 2 >nul
+
+    REM WAIT 2 seconds using PowerShell (safe inside concurrently)
+    powershell -command "Start-Sleep -Seconds 2"
+
     echo ✅ OBS stopped.
 ) else (
     echo 🟢 Starting OBS silently...
