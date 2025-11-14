@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, desktopCapturer, screen, globalShortcut } from "electron";
 import path from "path";
 import { fileURLToPath } from "url";
+import process from "process";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,8 +45,12 @@ function createWindow() {
   mainWindow.setContentProtection(false);
   mainWindow.setIgnoreMouseEvents(false, { forward: true });
 
+  // mainWindow.loadURL("http://localhost:5173");
+if (process.env.NODE_ENV === "development") {
   mainWindow.loadURL("http://localhost:5173");
-
+} else {
+  mainWindow.loadFile(path.join(__dirname, "../dist-react/index.html"));
+}
   // ---------------- HANDLE CTRL + SPACE ----------------
   globalShortcut.register("CommandOrControl+Space", () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
