@@ -24,8 +24,10 @@ export default function App() {
   const [isHidden, setIsHidden] = useState(false);
 
   const [ocrLoading, setOcrLoading] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false); // NEW (Ask ↔ Cancel)
-  const [hideTranscript, setHideTranscript] = useState(false); // NEW (Hide Left Panel)
+  const [aiLoading, setAiLoading] = useState(false);
+  const [hideTranscript, setHideTranscript] = useState(false);
+
+  const [muteAudio, setMuteAudio] = useState(false); // 🔵 NEW: only mute (no disconnect)
 
   const ocrAbortRef = useRef(null);
   const overlayRef = useRef(null);
@@ -42,7 +44,7 @@ export default function App() {
     }
   }, []);
 
-  // ------------------- MOVEMENT KEYS (unchanged) -------------------
+  // ------------------- MOVEMENT KEYS -------------------
   useEffect(() => {
     const step = 15;
     const handler = (e) => {
@@ -56,7 +58,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // ------------------- RESIZE KEYS (unchanged) -------------------
+  // ------------------- RESIZE KEYS -------------------
   useEffect(() => {
     const step = 20;
     const handler = async (e) => {
@@ -76,14 +78,15 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // ------------------- BUTTON HOTKEYS (simple keys) -------------------
+  // ------------------- BUTTON HOTKEYS -------------------
   useEffect(() => {
     const handler = (e) => {
       if (e.ctrlKey && !e.altKey && !e.shiftKey && e.key === "ArrowLeft") {
-        setHideTranscript(p => !p);
+        setHideTranscript((p) => !p);
         return;
       }
       if (e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return;
+
       switch (e.key.toLowerCase()) {
         case "z":
           handleStartPause();
@@ -101,16 +104,32 @@ export default function App() {
           clearHistory();
           break;
         case "a":
-          askAI(); // auto toggles Ask/Cancel
+          askAI();
           break;
+        case "s": // 🔵 NEW: hotkey mute toggle
+          toggleMute();
+          break;
+
         default:
           return;
       }
     };
 
-     window.addEventListener("keydown", handler);
-  return () => window.removeEventListener("keydown", handler);
-}, [connected, shots, ocrLoading, finalTranscript, partialTranscript, aiLoading]);
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [connected, shots, ocrLoading, finalTranscript, partialTranscript, aiLoading]);
+
+  // ------------------- MUTE FUNCTION -------------------
+  const toggleMute = () => {
+    setMuteAudio((prev) => {
+      const next = !prev;
+
+      // send mute flag but do NOT disconnect socket
+      wsRef.current?.send(JSON.stringify({ type: "set_mute", mute: next }));
+
+      return next;
+    });
+  };
 
   // ------------------- WEBSOCKET -------------------
   const connectWebSocket = () => {
@@ -124,6 +143,9 @@ export default function App() {
       setFinalTranscript("");
       setPartialTranscript("");
       setAiResponse("");
+
+      // send current mute state immediately
+      ws.send(JSON.stringify({ type: "set_mute", mute: muteAudio }));
     };
 
     ws.onclose = () => {
@@ -158,12 +180,15 @@ export default function App() {
       if (msg.type === "audio_status") {
         setIsReceivingAudio(true);
         clearTimeout(audioTimer.current);
-        audioTimer.current = setTimeout(() => setIsReceivingAudio(false), 2000);
+        audioTimer.current = setTimeout(
+          () => setIsReceivingAudio(false),
+          2000
+        );
       }
 
       if (msg.type === "ai_answer") {
         setAiResponse(msg.text || "No response");
-        setAiLoading(false); // IMPORTANT — stop spinner, toggle Cancel→Ask
+        setAiLoading(false);
       }
     };
   };
@@ -176,18 +201,16 @@ export default function App() {
     setAiLoading(false);
   };
 
-  // ------------------- ASK AI (now toggle Ask ↔ Cancel) -------------------
+  // ------------------- ASK AI -------------------
   const askAI = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-    // Cancel AI if already asking
     if (aiLoading) {
       setAiLoading(false);
       setAiResponse("Cancelled.");
       return;
     }
 
-    // Send AI request
     const full = `${finalTranscript} ${partialTranscript}`.trim();
     wsRef.current.send(JSON.stringify({ type: "ask_ai", text: full }));
 
@@ -262,7 +285,7 @@ export default function App() {
     }
   };
 
-  // ------------------- RESIZE DRAG LOGIC (unchanged) -------------------
+  // ------------------- RESIZE DRAG LOGIC -------------------
   const resizing = useRef(false);
   const startPos = useRef({ x: 0, y: 0 });
   const startSize = useRef({ w: 0, h: 0 });
@@ -389,7 +412,9 @@ export default function App() {
               {connected ? "Pause" : "Start"}
             </button>
 
-            <button style={btn} onClick={captureUnderlay}>Capture</button>
+            <button style={btn} onClick={captureUnderlay}>
+              Capture
+            </button>
 
             <button style={btn} onClick={removeScreenshot} disabled={!shots.length}>
               Remove Img
@@ -399,14 +424,21 @@ export default function App() {
               {ocrLoading ? "Stop OCR" : "OCR"}
             </button>
 
-            <button style={btn} onClick={clearHistory}>Clear</button>
+            <button style={btn} onClick={clearHistory}>
+              Clear
+            </button>
 
             <button style={btn} onClick={askAI} disabled={!connected}>
               {aiLoading ? "Cancel" : "Ask"}
             </button>
 
-            <button style={btn} onClick={() => setHideTranscript(p => !p)}>
+            <button style={btn} onClick={() => setHideTranscript((p) => !p)}>
               {hideTranscript ? "User" : "Show"}
+            </button>
+
+            {/* 🔵 NEW: Mute Toggle */}
+            <button style={btn} onClick={toggleMute}>
+              {muteAudio ? "Audio OFF" : "Audio ON"}
             </button>
           </div>
         </div>
@@ -414,7 +446,6 @@ export default function App() {
         {/* Panels */}
         <div style={{ flex: 1, display: "flex", gap: 8, overflow: "hidden" }}>
           
-          {/* LEFT PANEL (User transcript + screenshot) */}
           {!hideTranscript && (
             <div style={{ flexBasis: "30%" }}>
               <div
@@ -452,7 +483,6 @@ export default function App() {
             </div>
           )}
 
-          {/* RIGHT PANEL (AI response) */}
           <div style={{ flex: hideTranscript ? 1 : "70%" }}>
             <div
               style={{
@@ -462,7 +492,8 @@ export default function App() {
                 borderRadius: 8,
                 padding: 6,
                 fontSize: 12,
-                fontFamily: "'JetBrains Mono', Consolas, 'Courier New', monospace",
+                fontFamily:
+                  "'JetBrains Mono', Consolas, 'Courier New', monospace",
                 background: "rgba(255,255,255,0.08)",
               }}
             >
