@@ -31,6 +31,9 @@ const textractClient = new TextractClient({
 // 🔵 NEW — GLOBAL MUTE FLAG
 let muteAudio = false;
 
+// 🔵 NEW — 100ms of silence (PCM 16bit LE, 16kHz = 3200 bytes)
+const SILENCE_FRAME = Buffer.alloc(3200);
+
 // ---------- Async queue ----------
 class IncomingQueue {
   constructor() {
@@ -40,7 +43,8 @@ class IncomingQueue {
   }
   push(buf) {
     if (this._closed) return;
-    if (this._resolvers.length > 0) this._resolvers.shift()({ value: buf, done: false });
+    if (this._resolvers.length > 0)
+      this._resolvers.shift()({ value: buf, done: false });
     else this._buffers.push(buf);
   }
   close() {
@@ -79,7 +83,9 @@ httpServer.on("upgrade", (req, socket, head) => {
       wssTranscribe.emit("connection", ws)
     );
   else if (req.url === "/ui")
-    wssUI.handleUpgrade(req, socket, head, (ws) => wssUI.emit("connection", ws));
+    wssUI.handleUpgrade(req, socket, head, (ws) =>
+      wssUI.emit("connection", ws)
+    );
   else socket.destroy();
 });
 
@@ -154,16 +160,22 @@ wssTranscribe.on("connection", async (ws) => {
 
   const queue = new IncomingQueue();
 
+  // 🔵 NEW — HEARTBEAT SILENCE LOOP
+  const silenceInterval = setInterval(() => {
+    if (muteAudio) {
+      queue.push(SILENCE_FRAME); // feed AWS 100ms silence
+    }
+  }, 4000); // every 4 seconds
+
   ws.on("message", (msg, isBinary) => {
-
-    // 🔵 NEW: MUTE MODE — DROP AUDIO
-    if (muteAudio) return;
-
-    if (isBinary) queue.push(msg);
-    broadcast({ type: "audio_status", status: "receiving" });
+    if (!muteAudio && isBinary) {
+      queue.push(msg);
+      broadcast({ type: "audio_status", status: "receiving" });
+    }
   });
 
   ws.on("close", () => {
+    clearInterval(silenceInterval);
     console.log("🔌 OBS stream disconnected");
     broadcast({ type: "status", message: "OBS stream disconnected" });
     queue.close();
@@ -202,6 +214,7 @@ wssTranscribe.on("connection", async (ws) => {
     console.error("❌ AWS Transcribe error:", err);
     broadcast({ type: "error", message: err.message });
   } finally {
+    clearInterval(silenceInterval);
     queue.close();
   }
 });

@@ -18,7 +18,7 @@ let isHiddenState = false; // our stealth toggle
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 440,
+    width: 445,
     height: 300,
     frame: false,
     transparent: true,

@@ -9,8 +9,8 @@ const btn = {
   background: "rgba(255,255,255,0.15)",
   color: "white",
   border: "1px solid rgba(255,255,255,0.3)",
-  cursor: "pointer",
-  whiteSpace: "nowrap",
+  cursor: "default",
+  whiteSpace: "nowrap"
 };
 
 export default function App() {
@@ -424,7 +424,7 @@ export default function App() {
               {ocrLoading ? "Stop OCR" : "OCR"}
             </button>
 
-            <button style={btn} onClick={clearHistory}>
+            <button style={btn } onClick={clearHistory}>
               Clear
             </button>
 
@@ -514,7 +514,7 @@ export default function App() {
             borderRadius: "50%",
             background: "white",
             boxShadow: "0 0 10px rgba(255,255,255,0.9)",
-            cursor: "nwse-resize",
+            cursor: "default",
             WebkitAppRegion: "no-drag",
           }}
         />
