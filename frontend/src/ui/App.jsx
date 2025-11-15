@@ -27,7 +27,10 @@ export default function App() {
   const [aiLoading, setAiLoading] = useState(false);
   const [hideTranscript, setHideTranscript] = useState(false);
 
-  const [muteAudio, setMuteAudio] = useState(false); // 🔵 NEW: only mute (no disconnect)
+  const [muteAudio, setMuteAudio] = useState(false);
+
+  // 🔵 NEW — for manual input
+  const [manualText, setManualText] = useState("");
 
   const ocrAbortRef = useRef(null);
   const overlayRef = useRef(null);
@@ -35,7 +38,9 @@ export default function App() {
   const wsRef = useRef(null);
   const audioTimer = useRef(null);
 
-  // ------------------- TOGGLE VISIBILITY -------------------
+  // ------------------------------------------------------------
+  // VISIBILITY TOGGLE
+  // ------------------------------------------------------------
   useEffect(() => {
     if (window.electronAPI?.onToggleVisibility) {
       window.electronAPI.onToggleVisibility(() => {
@@ -44,7 +49,9 @@ export default function App() {
     }
   }, []);
 
-  // ------------------- MOVEMENT KEYS -------------------
+  // ------------------------------------------------------------
+  // MOVEMENT KEYS
+  // ------------------------------------------------------------
   useEffect(() => {
     const step = 15;
     const handler = (e) => {
@@ -58,7 +65,9 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // ------------------- RESIZE KEYS -------------------
+  // ------------------------------------------------------------
+  // RESIZE KEYS
+  // ------------------------------------------------------------
   useEffect(() => {
     const step = 20;
     const handler = async (e) => {
@@ -78,7 +87,9 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // ------------------- BUTTON HOTKEYS -------------------
+  // ------------------------------------------------------------
+  // HOTKEY BUTTONS
+  // ------------------------------------------------------------
   useEffect(() => {
     const handler = (e) => {
       if (e.ctrlKey && !e.altKey && !e.shiftKey && e.key === "ArrowLeft") {
@@ -106,12 +117,9 @@ export default function App() {
         case "a":
           askAI();
           break;
-        case "s": // 🔵 NEW: hotkey mute toggle
+        case "s":
           toggleMute();
           break;
-
-        default:
-          return;
       }
     };
 
@@ -119,19 +127,20 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [connected, shots, ocrLoading, finalTranscript, partialTranscript, aiLoading]);
 
-  // ------------------- MUTE FUNCTION -------------------
+  // ------------------------------------------------------------
+  // MUTE FUNCTION
+  // ------------------------------------------------------------
   const toggleMute = () => {
     setMuteAudio((prev) => {
       const next = !prev;
-
-      // send mute flag but do NOT disconnect socket
       wsRef.current?.send(JSON.stringify({ type: "set_mute", mute: next }));
-
       return next;
     });
   };
 
-  // ------------------- WEBSOCKET -------------------
+  // ------------------------------------------------------------
+  // WEBSOCKET
+  // ------------------------------------------------------------
   const connectWebSocket = () => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
@@ -143,8 +152,6 @@ export default function App() {
       setFinalTranscript("");
       setPartialTranscript("");
       setAiResponse("");
-
-      // send current mute state immediately
       ws.send(JSON.stringify({ type: "set_mute", mute: muteAudio }));
     };
 
@@ -201,7 +208,9 @@ export default function App() {
     setAiLoading(false);
   };
 
-  // ------------------- ASK AI -------------------
+  // ------------------------------------------------------------
+  // ASK AI
+  // ------------------------------------------------------------
   const askAI = () => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
@@ -218,12 +227,16 @@ export default function App() {
     setAiResponse("Thinking...");
   };
 
-  // ------------------- SCROLL -------------------
+  // ------------------------------------------------------------
+  // AUTO SCROLL
+  // ------------------------------------------------------------
   useEffect(() => {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
   }, [finalTranscript, partialTranscript, shots, ocrLoading]);
 
-  // ------------------- SCREEN CAPTURE -------------------
+  // ------------------------------------------------------------
+  // SCREEN CAPTURE
+  // ------------------------------------------------------------
   const captureUnderlay = async () => {
     try {
       if (!window.electronAPI?.captureUnderlay) return;
@@ -254,7 +267,9 @@ export default function App() {
     setPartialTranscript("");
   };
 
-  // ------------------- OCR LOGIC -------------------
+  // ------------------------------------------------------------
+  // OCR
+  // ------------------------------------------------------------
   const runOCR = async () => {
     if (!shots[0]) return alert("Capture first!");
 
@@ -285,7 +300,9 @@ export default function App() {
     }
   };
 
-  // ------------------- RESIZE DRAG LOGIC -------------------
+  // ------------------------------------------------------------
+  // RESIZE (Mouse)
+  // ------------------------------------------------------------
   const resizing = useRef(false);
   const startPos = useRef({ x: 0, y: 0 });
   const startSize = useRef({ w: 0, h: 0 });
@@ -321,7 +338,25 @@ export default function App() {
     window.removeEventListener("mouseup", onResizeEnd);
   };
 
-  // ------------------- UI -------------------
+  // ------------------------------------------------------------
+  // 🔵 NEW: APPEND MANUAL INPUT
+  // ------------------------------------------------------------
+  const addManualText = () => {
+    if (!manualText.trim()) return;
+
+    setFinalTranscript((p) => (p + " " + manualText.trim()).trim());
+    setManualText("");
+  };
+
+  const handleManualKey = (e) => {
+    if (e.key === "Enter") {
+      addManualText();
+    }
+  };
+
+  // ------------------------------------------------------------
+  // UI
+  // ------------------------------------------------------------
   return (
     <div
       style={{
@@ -424,7 +459,7 @@ export default function App() {
               {ocrLoading ? "Stop OCR" : "OCR"}
             </button>
 
-            <button style={btn } onClick={clearHistory}>
+            <button style={btn} onClick={clearHistory}>
               Clear
             </button>
 
@@ -436,7 +471,6 @@ export default function App() {
               {hideTranscript ? "User" : "Show"}
             </button>
 
-            {/* 🔵 NEW: Mute Toggle */}
             <button style={btn} onClick={toggleMute}>
               {muteAudio ? "Audio OFF" : "Audio ON"}
             </button>
@@ -447,11 +481,13 @@ export default function App() {
         <div style={{ flex: 1, display: "flex", gap: 8, overflow: "hidden" }}>
           
           {!hideTranscript && (
-            <div style={{ flexBasis: "30%" }}>
+            <div style={{ flexBasis: "30%", display: "flex", flexDirection: "column" }}>
+              
+              {/* Transcript Box */}
               <div
                 ref={scrollRef}
                 style={{
-                  height: "100%",
+                  flex: 1,
                   overflowY: "auto",
                   border: "1.5px solid white",
                   borderRadius: 8,
@@ -480,6 +516,27 @@ export default function App() {
                   </div>
                 )}
               </div>
+
+              {/* 🔵 NEW: Input box below transcript */}
+              <div style={{ display: "flex", marginTop: 6, gap: 4 }}>
+                <input
+                  value={manualText}
+                  onChange={(e) => setManualText(e.target.value)}
+                  onKeyDown={handleManualKey}
+                  placeholder="Add text..."
+                  style={{
+                    flex: 1,
+                    padding: 4,
+                    fontSize: 12,
+                    borderRadius: 6,
+                    border: "1px solid rgba(255,255,255,0.4)",
+                    background: "rgba(255,255,255,0.1)",
+                    color: "white",
+                  }}
+                />
+                <button style={btn} onClick={addManualText}>Add</button>
+              </div>
+
             </div>
           )}
 
