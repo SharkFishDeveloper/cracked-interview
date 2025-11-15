@@ -11,7 +11,9 @@ import {
 } from "@aws-sdk/client-textract";
 import OpenAI from "openai";
 import { promptAi } from "./promptAi.js";
+
 dotenv.config();
+
 const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -25,6 +27,10 @@ const textractClient = new TextractClient({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY_OCR,
   },
 });
+
+// 🔵 NEW — GLOBAL MUTE FLAG
+let muteAudio = false;
+
 // ---------- Async queue ----------
 class IncomingQueue {
   constructor() {
@@ -63,6 +69,7 @@ async function* audioEventGenerator(queue) {
 const httpServer = http.createServer();
 const wssTranscribe = new WebSocketServer({ noServer: true });
 const wssUI = new WebSocketServer({ noServer: true });
+
 let uiClients = new Set();
 
 // Upgrade routing
@@ -80,53 +87,59 @@ httpServer.on("upgrade", (req, socket, head) => {
 wssUI.on("connection", (ws) => {
   uiClients.add(ws);
   ws.send(JSON.stringify({ type: "info", message: "UI connected" }));
+
   ws.on("close", () => uiClients.delete(ws));
-   // ------------------ NEW: ASK AI HANDLER ------------------
+
+  // ------------------ UI MESSAGE HANDLER ------------------
   ws.on("message", async (raw) => {
     let msg;
     try {
       msg = JSON.parse(raw);
-    } catch (e) {
+    } catch {
       return;
     }
 
+    // 🔵 NEW: MUTE HANDLER
+    if (msg.type === "set_mute") {
+      muteAudio = !!msg.mute;
+      console.log("🎚️ Mute toggled:", muteAudio);
+      return;
+    }
+
+    // ------------------ ASK AI HANDLER ------------------
     if (msg.type === "ask_ai") {
-  const userText = msg.text?.trim();
-  if (!userText) return;
+      const userText = msg.text?.trim();
+      if (!userText) return;
 
+      try {
+        const response = await openaiClient.responses.create({
+          model: "gpt-4o-mini",
+          input: [
+            { role: "system", content: promptAi },
+            { role: "user", content: userText },
+          ],
+        });
 
-  try {
-    const response = await openaiClient.responses.create({
-    model: "gpt-4o-mini",
-    input: [
-      {
-        role: "system",
-        content: promptAi
-      },
-      {
-        role: "user",
-        content: userText
+        const answer = response.output_text || "No answer";
+
+        ws.send(
+          JSON.stringify({
+            type: "ai_answer",
+            text: answer,
+          })
+        );
+      } catch (err) {
+        ws.send(
+          JSON.stringify({
+            type: "ai_answer",
+            text: "AI failed: " + err.message,
+          })
+        );
       }
-    ]
-    });
-    const answer = response.output_text || "No answer";
-
-    ws.send(JSON.stringify({
-      type: "ai_answer",
-      text: answer,
-    }));
-
-  } catch (err) {
-    // console.error("❌ OpenAI Error:", err);
-
-    ws.send(JSON.stringify({
-      type: "ai_answer",
-      text: "AI failed: " + err.message,
-    }));
-  }
-}
+    }
   });
 });
+
 // Broadcast helper
 function broadcast(obj) {
   const msg = JSON.stringify(obj);
@@ -140,10 +153,16 @@ wssTranscribe.on("connection", async (ws) => {
   broadcast({ type: "status", message: "OBS stream connected" });
 
   const queue = new IncomingQueue();
+
   ws.on("message", (msg, isBinary) => {
+
+    // 🔵 NEW: MUTE MODE — DROP AUDIO
+    if (muteAudio) return;
+
     if (isBinary) queue.push(msg);
     broadcast({ type: "audio_status", status: "receiving" });
   });
+
   ws.on("close", () => {
     console.log("🔌 OBS stream disconnected");
     broadcast({ type: "status", message: "OBS stream disconnected" });
@@ -164,15 +183,18 @@ wssTranscribe.on("connection", async (ws) => {
     const response = await transcribeClient.send(command);
     for await (const evt of response.TranscriptResultStream) {
       if (!evt.TranscriptEvent) continue;
+
       const results = evt.TranscriptEvent.Transcript.Results ?? [];
       for (const r of results) {
         const text = r.Alternatives?.[0]?.Transcript?.trim();
         if (!text) continue;
+
         const payload = {
           type: "transcript",
           transcript: text,
           isPartial: r.IsPartial,
         };
+
         broadcast(payload);
       }
     }
@@ -184,23 +206,18 @@ wssTranscribe.on("connection", async (ws) => {
   }
 });
 
-
 // -------------- AWS TEXTRACT OCR ENDPOINT --------------
 httpServer.on("request", async (req, res) => {
-  // --------- GLOBAL CORS FIX ALWAYS RUNS ----------
+  // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  
-  // preflight
+
   if (req.method === "OPTIONS") {
     res.writeHead(200);
     return res.end();
   }
-  // ------------------------------------------------
 
-
-  // ----------- OCR ENDPOINT -----------------------
   if (req.method === "POST" && req.url === "/ocr") {
     console.log("📩 OCR POST hit");
 
@@ -219,11 +236,9 @@ httpServer.on("request", async (req, res) => {
           return res.end(JSON.stringify({ error: "Missing image" }));
         }
 
-        // decode data URL
         const base64data = image.replace(/^data:image\/\w+;base64,/, "");
         const buffer = Buffer.from(base64data, "base64");
 
-        // --- Textract ---
         const command = new AnalyzeDocumentCommand({
           Document: { Bytes: buffer },
           FeatureTypes: ["FORMS", "TABLES"],
@@ -239,7 +254,6 @@ httpServer.on("request", async (req, res) => {
             .join("\n");
         }
 
-        // ✔ CORS headers MUST be here too
         res.writeHead(200, {
           "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "*",
@@ -253,6 +267,7 @@ httpServer.on("request", async (req, res) => {
           "Content-Type": "application/json",
           "Access-Control-Allow-Origin": "*",
         });
+
         return res.end(
           JSON.stringify({
             error: "Textract failed",
@@ -267,5 +282,6 @@ httpServer.on("request", async (req, res) => {
 const PORT = 8080;
 httpServer.listen(PORT, () =>
   console.log(`🚀 Server ready:
-  ws://localhost:${PORT}/transcribe (OBS audio)
-  ws://localhost:${PORT}/ui          (dashboard)`));
+  ws://localhost:${PORT}/transcribe
+  ws://localhost:${PORT}/ui`)
+);
